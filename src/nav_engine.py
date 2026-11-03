@@ -2,6 +2,7 @@
 
 import csv
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
 
@@ -9,6 +10,7 @@ from src.models import SchemeType
 
 
 DEFAULT_HOLIDAYS_FILE = Path(__file__).resolve().parent.parent / "data" / "holidays.csv"
+DEFAULT_NAV_FILE = Path(__file__).resolve().parent.parent / "data" / "nav.csv"
 
 
 def load_holidays(holidays_file: Path = DEFAULT_HOLIDAYS_FILE) -> set[date]:
@@ -43,6 +45,29 @@ def previous_business_day(day: date, holidays: Iterable[date] = ()) -> date:
     while not is_business_day(candidate, holiday_set):
         candidate -= timedelta(days=1)
     return candidate
+
+
+def get_nav_value(
+    scheme_id: str,
+    nav_date: date,
+    nav_file: Path = DEFAULT_NAV_FILE,
+) -> Decimal:
+    """Read one scheme NAV from the NAV CSV file."""
+    if not nav_file.exists():
+        raise ValueError("NAV file not found")
+
+    with nav_file.open(newline="", encoding="utf-8") as file:
+        for row in csv.DictReader(file):
+            if row["scheme_id"] == scheme_id and date.fromisoformat(row["nav_date"]) == nav_date:
+                try:
+                    nav = Decimal(row["nav_value"])
+                except InvalidOperation as error:
+                    raise ValueError("NAV value must be valid decimal number") from error
+                if nav <= 0:
+                    raise ValueError("NAV must be greater than zero")
+                return nav
+
+    raise ValueError(f"NAV not found for scheme {scheme_id} on {nav_date.isoformat()}")
 
 
 def get_nav_cutoff(scheme_type: SchemeType) -> time:
