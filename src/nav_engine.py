@@ -16,11 +16,20 @@ DEFAULT_NAV_FILE = Path(__file__).resolve().parent.parent / "data" / "nav.csv"
 def load_holidays(holidays_file: Path = DEFAULT_HOLIDAYS_FILE) -> set[date]:
     """CSV ಫೈಲ್‌ನ `date` ಕಾಲಮ್‌ನಿಂದ ರಜಾದಿನಗಳನ್ನು ಓದುತ್ತದೆ."""
     holidays = set()
-    if not holidays_file.exists():
-        return holidays
-    with holidays_file.open(newline="", encoding="utf-8") as file:
-        for row in csv.DictReader(file):
-            holidays.add(date.fromisoformat(row["date"]))
+    files_to_try = [holidays_file]
+    sample_pack_holidays = (
+        Path(__file__).resolve().parent.parent / "data" / "sample_pack" / "holidays.csv"
+    )
+    if sample_pack_holidays != holidays_file and sample_pack_holidays.exists():
+        files_to_try.append(sample_pack_holidays)
+
+    for file_path in files_to_try:
+        if not file_path.exists():
+            continue
+        with file_path.open(newline="", encoding="utf-8") as file:
+            for row in csv.DictReader(file):
+                if "date" in row and row["date"].strip():
+                    holidays.add(date.fromisoformat(row["date"].strip()))
     return holidays
 
 
@@ -53,19 +62,32 @@ def get_nav_value(
     nav_file: Path = DEFAULT_NAV_FILE,
 ) -> Decimal:
     """Read one scheme NAV from the NAV CSV file."""
-    if not nav_file.exists():
-        raise ValueError("NAV file not found")
+    files_to_try = [nav_file]
+    sample_pack_navs = (
+        Path(__file__).resolve().parent.parent / "data" / "sample_pack" / "navs.csv"
+    )
+    if sample_pack_navs != nav_file and sample_pack_navs.exists():
+        files_to_try.append(sample_pack_navs)
 
-    with nav_file.open(newline="", encoding="utf-8") as file:
-        for row in csv.DictReader(file):
-            if row["scheme_id"] == scheme_id and date.fromisoformat(row["nav_date"]) == nav_date:
-                try:
-                    nav = Decimal(row["nav_value"])
-                except InvalidOperation as error:
-                    raise ValueError("NAV value must be valid decimal number") from error
-                if nav <= 0:
-                    raise ValueError("NAV must be greater than zero")
-                return nav
+    for file_path in files_to_try:
+        if not file_path.exists():
+            continue
+
+        with file_path.open(newline="", encoding="utf-8") as file:
+            for row in csv.DictReader(file):
+                if row.get("scheme_id") == scheme_id and (
+                    "nav_date" in row
+                    and date.fromisoformat(row["nav_date"]) == nav_date
+                ):
+                    val_str = row.get("nav") or row.get("nav_value")
+                    if val_str:
+                        try:
+                            nav = Decimal(val_str)
+                        except InvalidOperation as error:
+                            raise ValueError("NAV value must be valid decimal number") from error
+                        if nav <= 0:
+                            raise ValueError("NAV must be greater than zero")
+                        return nav
 
     raise ValueError(f"NAV not found for scheme {scheme_id} on {nav_date.isoformat()}")
 
@@ -84,6 +106,7 @@ def get_applicable_nav_date(
     order_received_at: datetime,
     funds_realised_at: datetime | None = None,
     holidays: Iterable[date] = (),
+    use_calendar_day_for_liquid: bool = False,
 ) -> date:
     """ನಂತರದ timestamp ಮತ್ತು scheme cut-off ಬಳಸಿ ಅನ್ವಯಿಸುವ NAV ದಿನಾಂಕ ಆಯ್ಕೆಮಾಡುತ್ತದೆ."""
     effective_time = order_received_at
@@ -95,6 +118,11 @@ def get_applicable_nav_date(
     cutoff = get_nav_cutoff(scheme_type)
 
     if scheme_type == SchemeType.LIQUID:
+        if use_calendar_day_for_liquid:
+            if effective_time.time() < cutoff:
+                return effective_date - timedelta(days=1)
+            else:
+                return effective_date
         if effective_time.time() < cutoff and is_business_day(effective_date, holiday_set):
             return previous_business_day(effective_date, holiday_set)
         return next_business_day(effective_date, holiday_set)

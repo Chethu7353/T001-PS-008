@@ -1,0 +1,7 @@
+scheme_id,scheme_name,scheme_type,elss,cutoff_time,min_first_purchase,min_additional,min_sip,min_redemption
+SCH-01,Sahyadri Bluechip Fund - Direct Growth,EQUITY,false,15:00:00,5000.00,1000.00,500.00,1000.00
+SCH-02,Sahyadri Flexi Cap Fund - Direct Growth,EQUITY,false,15:00:00,5000.00,1000.00,500.00,1000.00
+SCH-03,Sahyadri Tax Saver (ELSS) - Direct Growth,EQUITY,true,15:00:00,5000.00,1000.00,500.00,1000.00
+SCH-04,Sahyadri Short Duration Fund - Direct Growth,DEBT,false,15:00:00,5000.00,1000.00,500.00,1000.00
+SCH-05,Sahyadri Corporate Bond Fund - Direct Growth,DEBT,false,15:00:00,5000.00,1000.00,500.00,1000.00
+SCH-06,Sahyadri Liquid Fund - Direct Growth,LIQUID,false,13:30:00,5000.00,1000.00,500.00,1000.00

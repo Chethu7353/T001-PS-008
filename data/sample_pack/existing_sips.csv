@@ -1,0 +1,3 @@
+sip_id,folio_id,scheme_id,amount,sip_day,registered_date,status,consecutive_failures
+SIP-E01,FOL-009,SCH-01,5000.00,10,2025-10-20,ACTIVE,2
+SIP-E02,FOL-010,SCH-04,2000.00,5,2025-11-03,ACTIVE,1
