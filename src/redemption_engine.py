@@ -1,7 +1,7 @@
 """Simple mutual fund redemption calculations."""
 
 from datetime import date
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_HALF_UP
 from typing import Iterable
 
 from src.models import InvestmentLot, SchemeType
@@ -98,7 +98,7 @@ def redeem_by_amount(
             raise ValueError(
                 "Redemption amount must be at least ₹1000 or redeem all available units"
             )
-        units = (amount / nav).quantize(UNIT_PRECISION, rounding=ROUND_DOWN)
+        units = (amount / nav).quantize(UNIT_PRECISION, rounding=ROUND_CEILING)
         if units <= 0:
             raise ValueError("Redemption amount is too small to redeem units")
         if units > available_units:

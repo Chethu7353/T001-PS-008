@@ -68,6 +68,25 @@ def test_redeem_by_amount_uses_nav_and_rounds_units_down():
     assert result["remaining_units"] == Decimal("8.000")
 
 
+def test_redeem_by_amount_ceil_rounding():
+    result = redeem_by_amount(Decimal("20.000"), Decimal("1500.01"), Decimal("125.00"))
+
+    assert result["units"] == Decimal("12.001")
+    assert result["amount"] == Decimal("1500.13")
+    assert result["remaining_units"] == Decimal("7.999")
+
+
+def test_redeem_by_amount_rejects_insufficient_units_after_ceiling():
+    with pytest.raises(ValueError, match="Insufficient available units"):
+        redeem_by_amount(Decimal("12.000"), Decimal("1500.01"), Decimal("125.00"))
+
+
+def test_redeem_by_amount_exact_units():
+    result = redeem_by_amount(Decimal("20.000"), Decimal("1500.00"), Decimal("125.00"))
+
+    assert result["units"] == Decimal("12.000")
+
+
 @pytest.mark.parametrize(
     ("scheme_type", "expected"),
     [
