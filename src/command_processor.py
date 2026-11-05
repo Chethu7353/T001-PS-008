@@ -9,7 +9,7 @@ from typing import TextIO
 from src.exit_load_engine import ExitLoadSchedule, load_exit_loads
 from src.lot_manager import LotManager, get_elss_lock_in_date
 from src.models import Folio, InvestmentLot, Scheme, SchemeType
-from src.nav_engine import get_applicable_nav_date, load_holidays
+from src.nav_engine import get_applicable_nav_date, load_holidays, load_navs
 from src.redemption_engine import calculate_payout_date
 from src.sip_engine import SIPManager
 from src.switch_engine import process_switch
@@ -96,11 +96,7 @@ class CommandProcessor:
         # NAVs
         navs_file = self.data_dir / "navs.csv"
         if navs_file.exists():
-            with navs_file.open(newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    key = (row["scheme_id"], date.fromisoformat(row["nav_date"]))
-                    self.navs[key] = Decimal(row["nav"])
+            self.navs = load_navs(navs_file)
 
         # Lots opening
         lots_file = self.data_dir / "lots_opening.csv"
@@ -460,6 +456,9 @@ class CommandProcessor:
         inst_no = int(inst_no_str)
         realised_ts = datetime.fromisoformat(realised_ts_str)
 
+        scheduled_date = self.sip_manager.scheduled_date(
+            sip_id, inst_no, self.holidays
+        )
         ok, cf, st = self.sip_manager.record_debit_result(sip_id, inst_no, result_str)
         sip = self.sip_manager.sips[sip_id]
         scheme = self.schemes[sip.scheme_id]
@@ -509,7 +508,7 @@ class CommandProcessor:
                 "sip_id": sip_id,
                 "event": "SIP_DEBIT_RESULT",
                 "instalment_no": str(inst_no),
-                "scheduled_date": realised_ts.date().isoformat(),
+                "scheduled_date": scheduled_date.isoformat(),
                 "result": "SUCCESS",
                 "order_id": order_id,
                 "consecutive_failures": "0",
@@ -522,7 +521,7 @@ class CommandProcessor:
                 "sip_id": sip_id,
                 "event": "SIP_DEBIT_RESULT",
                 "instalment_no": str(inst_no),
-                "scheduled_date": realised_ts.date().isoformat(),
+                "scheduled_date": scheduled_date.isoformat(),
                 "result": "FAILED",
                 "order_id": "",
                 "consecutive_failures": str(cf),

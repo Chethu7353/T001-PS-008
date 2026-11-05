@@ -72,24 +72,46 @@ def get_nav_value(
     for file_path in files_to_try:
         if not file_path.exists():
             continue
-
-        with file_path.open(newline="", encoding="utf-8") as file:
-            for row in csv.DictReader(file):
-                if row.get("scheme_id") == scheme_id and (
-                    "nav_date" in row
-                    and date.fromisoformat(row["nav_date"]) == nav_date
-                ):
-                    val_str = row.get("nav") or row.get("nav_value")
-                    if val_str:
-                        try:
-                            nav = Decimal(val_str)
-                        except InvalidOperation as error:
-                            raise ValueError("NAV value must be valid decimal number") from error
-                        if nav <= 0:
-                            raise ValueError("NAV must be greater than zero")
-                        return nav
+        navs = load_navs(file_path)
+        key = (scheme_id, nav_date)
+        if key in navs:
+            return navs[key]
 
     raise ValueError(f"NAV not found for scheme {scheme_id} on {nav_date.isoformat()}")
+
+
+def load_navs(nav_file: Path) -> dict[tuple[str, date], Decimal]:
+    """Load NAV records, rejecting invalid values and duplicate scheme/date keys."""
+    navs: dict[tuple[str, date], Decimal] = {}
+    with nav_file.open(newline="", encoding="utf-8") as file:
+        for row_number, row in enumerate(csv.DictReader(file), start=2):
+            scheme_id = (row.get("scheme_id") or "").strip()
+            date_text = (row.get("nav_date") or "").strip()
+            value_text = (row.get("nav") or row.get("nav_value") or "").strip()
+            if not scheme_id:
+                raise ValueError(f"NAV row {row_number}: scheme_id is required")
+            try:
+                nav_date = date.fromisoformat(date_text)
+            except ValueError as error:
+                raise ValueError(f"NAV row {row_number}: invalid NAV date") from error
+            if nav_date.isoformat() != date_text:
+                raise ValueError(f"NAV row {row_number}: NAV date must use YYYY-MM-DD")
+            try:
+                nav = Decimal(value_text)
+            except (InvalidOperation, ValueError) as error:
+                raise ValueError(f"NAV row {row_number}: NAV must be a valid decimal") from error
+            if not nav.is_finite() or nav <= 0:
+                raise ValueError(f"NAV row {row_number}: NAV must be greater than zero")
+            if nav.as_tuple().exponent != -4:
+                raise ValueError(f"NAV row {row_number}: NAV must have four decimal places")
+
+            key = (scheme_id, nav_date)
+            if key in navs:
+                raise ValueError(
+                    f"NAV row {row_number}: duplicate NAV for {scheme_id} on {date_text}"
+                )
+            navs[key] = nav
+    return navs
 
 
 def get_nav_cutoff(scheme_type: SchemeType) -> time:

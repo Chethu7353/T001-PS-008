@@ -1,10 +1,16 @@
 from datetime import date, datetime, time
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
 
 from src.models import SchemeType
 from src.nav_engine import (
     get_applicable_nav_date,
     get_nav_cutoff,
+    get_nav_value,
     is_business_day,
+    load_navs,
     next_business_day,
     previous_business_day,
 )
@@ -76,3 +82,71 @@ def test_scheme_cutoff_times():
     assert get_nav_cutoff(SchemeType.EQUITY) == time(15, 0)
     assert get_nav_cutoff(SchemeType.DEBT) == time(15, 0)
     assert get_nav_cutoff(SchemeType.LIQUID) == time(13, 30)
+
+
+def _write_nav_file(path: Path, rows: list[str]) -> Path:
+    path.write_text(
+        "nav_date,scheme_id,nav\n" + "\n".join(rows) + "\n", encoding="utf-8"
+    )
+    return path
+
+
+def test_load_navs_accepts_valid_records(tmp_path):
+    nav_file = _write_nav_file(
+        tmp_path / "navs.csv", ["2026-01-23,SCH-TEST,12.3456"]
+    )
+
+    assert load_navs(nav_file) == {
+        ("SCH-TEST", date(2026, 1, 23)): Decimal("12.3456")
+    }
+
+
+def test_duplicate_scheme_date_nav_is_rejected(tmp_path):
+    nav_file = _write_nav_file(
+        tmp_path / "navs.csv",
+        ["2026-01-23,SCH-TEST,12.3456", "2026-01-23,SCH-TEST,12.5000"],
+    )
+
+    with pytest.raises(ValueError, match="duplicate NAV"):
+        load_navs(nav_file)
+
+
+@pytest.mark.parametrize(
+    ("row", "message"),
+    [
+        ("23-01-2026,SCH-TEST,12.3456", "invalid NAV date"),
+        ("2026-01-23,SCH-TEST,not-a-number", "valid decimal"),
+        ("2026-01-23,SCH-TEST,12.34", "four decimal places"),
+        ("2026-01-23,SCH-TEST,0", "greater than zero"),
+        ("2026-01-23,SCH-TEST,-1.25", "greater than zero"),
+    ],
+)
+def test_invalid_nav_records_are_rejected(tmp_path, row, message):
+    nav_file = _write_nav_file(tmp_path / "navs.csv", [row])
+
+    with pytest.raises(ValueError, match=message):
+        load_navs(nav_file)
+
+
+def test_missing_nav_lookup_raises_clear_error(tmp_path):
+    nav_file = _write_nav_file(
+        tmp_path / "navs.csv", ["2026-01-23,SCH-TEST,12.3456"]
+    )
+
+    with pytest.raises(ValueError, match="NAV not found for scheme SCH-OTHER"):
+        get_nav_value("SCH-OTHER", date(2026, 1, 23), nav_file)
+
+
+def test_invalid_nav_file_stops_processing_before_any_command(tmp_path):
+    _write_nav_file(tmp_path / "navs.csv", ["2026-01-23,SCH-TEST,0"])
+    commands = tmp_path / "commands.txt"
+    commands.write_text(
+        "PURCHASE|ORD-VALID|2026-01-23 10:00:00|FOL-001|SCH-01|5000.00|2026-01-23 10:00:00\n",
+        encoding="utf-8",
+    )
+    from src.command_processor import CommandProcessor
+
+    processor = CommandProcessor(data_dir=tmp_path)
+    with pytest.raises(ValueError, match="greater than zero"):
+        processor.process_file(commands)
+    assert processor.commands_processed == 0

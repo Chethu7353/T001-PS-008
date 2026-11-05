@@ -1,6 +1,6 @@
 """Basic domain models for the mutual fund order processing system."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
@@ -131,3 +131,4 @@ class SIP:
     status: str = "ACTIVE"
     consecutive_failures: int = 0
     paused_until_month: str | None = None
+    paused_months: set[str] = field(default_factory=set)
