@@ -10,7 +10,11 @@ from src.models import SchemeType
 
 
 DEFAULT_HOLIDAYS_FILE = Path(__file__).resolve().parent.parent / "data" / "holidays.csv"
-DEFAULT_NAV_FILE = Path(__file__).resolve().parent.parent / "data" / "nav.csv"
+DEFAULT_NAV_FILE = (
+    Path(__file__).resolve().parent.parent / "data" / "sample_pack" / "navs.csv"
+)
+if not DEFAULT_NAV_FILE.exists():
+    DEFAULT_NAV_FILE = Path(__file__).resolve().parent.parent / "data" / "nav.csv"
 
 
 def load_holidays(holidays_file: Path = DEFAULT_HOLIDAYS_FILE) -> set[date]:
@@ -62,48 +66,65 @@ def get_nav_value(
     nav_file: Path = DEFAULT_NAV_FILE,
 ) -> Decimal:
     """Read one scheme NAV from the NAV CSV file."""
-    files_to_try = [nav_file]
-    sample_pack_navs = (
-        Path(__file__).resolve().parent.parent / "data" / "sample_pack" / "navs.csv"
-    )
-    if sample_pack_navs != nav_file and sample_pack_navs.exists():
-        files_to_try.append(sample_pack_navs)
+    if not nav_file.exists():
+        raise ValueError(f"NAV file not found: {nav_file}")
 
-    for file_path in files_to_try:
-        if not file_path.exists():
-            continue
-        navs = load_navs(file_path)
-        key = (scheme_id, nav_date)
-        if key in navs:
-            return navs[key]
+    navs = load_navs(nav_file)
+    key = (scheme_id, nav_date)
+    if key in navs:
+        return navs[key]
 
     raise ValueError(f"NAV not found for scheme {scheme_id} on {nav_date.isoformat()}")
 
 
 def load_navs(nav_file: Path) -> dict[tuple[str, date], Decimal]:
     """Load NAV records, rejecting invalid values and duplicate scheme/date keys."""
+    if not nav_file.exists():
+        raise ValueError(f"NAV file not found: {nav_file}")
+
     navs: dict[tuple[str, date], Decimal] = {}
     with nav_file.open(newline="", encoding="utf-8") as file:
-        for row_number, row in enumerate(csv.DictReader(file), start=2):
-            scheme_id = (row.get("scheme_id") or "").strip()
-            date_text = (row.get("nav_date") or "").strip()
-            value_text = (row.get("nav") or row.get("nav_value") or "").strip()
+        reader = csv.DictReader(file)
+        for row_number, row in enumerate(reader, start=2):
+            raw_scheme = row.get("scheme_id")
+            scheme_id = (raw_scheme or "").strip()
             if not scheme_id:
                 raise ValueError(f"NAV row {row_number}: scheme_id is required")
+            if any(char.isspace() for char in scheme_id) or not scheme_id.isupper():
+                raise ValueError(f"NAV row {row_number}: invalid scheme identifier")
+
+            raw_date = row.get("nav_date")
+            date_text = (raw_date or "").strip()
+            if not date_text:
+                raise ValueError(f"NAV row {row_number}: nav_date is required")
             try:
                 nav_date = date.fromisoformat(date_text)
             except ValueError as error:
                 raise ValueError(f"NAV row {row_number}: invalid NAV date") from error
             if nav_date.isoformat() != date_text:
-                raise ValueError(f"NAV row {row_number}: NAV date must use YYYY-MM-DD")
+                raise ValueError(
+                    f"NAV row {row_number}: invalid NAV date (must use YYYY-MM-DD)"
+                )
+
+            raw_val = row.get("nav") or row.get("nav_value")
+            value_text = (raw_val or "").strip()
+            if not value_text:
+                raise ValueError(f"NAV row {row_number}: NAV value is required")
             try:
                 nav = Decimal(value_text)
             except (InvalidOperation, ValueError) as error:
-                raise ValueError(f"NAV row {row_number}: NAV must be a valid decimal") from error
-            if not nav.is_finite() or nav <= 0:
+                raise ValueError(
+                    f"NAV row {row_number}: NAV must be a valid decimal"
+                ) from error
+
+            if not nav.is_finite():
+                raise ValueError(f"NAV row {row_number}: NAV must be a finite number")
+            if nav <= 0:
                 raise ValueError(f"NAV row {row_number}: NAV must be greater than zero")
             if nav.as_tuple().exponent != -4:
-                raise ValueError(f"NAV row {row_number}: NAV must have four decimal places")
+                raise ValueError(
+                    f"NAV row {row_number}: NAV must have four decimal places"
+                )
 
             key = (scheme_id, nav_date)
             if key in navs:

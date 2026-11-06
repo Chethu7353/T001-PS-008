@@ -150,3 +150,77 @@ def test_invalid_nav_file_stops_processing_before_any_command(tmp_path):
     with pytest.raises(ValueError, match="greater than zero"):
         processor.process_file(commands)
     assert processor.commands_processed == 0
+
+
+@pytest.mark.parametrize(
+    ("val", "message"),
+    [
+        ("NaN", "finite number"),
+        ("Infinity", "finite number"),
+        ("-Infinity", "finite number"),
+        ("inf", "finite number"),
+        ("-inf", "finite number"),
+    ],
+)
+def test_non_finite_nav_is_rejected(tmp_path, val, message):
+    nav_file = _write_nav_file(tmp_path / "navs.csv", [f"2026-01-23,SCH-TEST,{val}"])
+    with pytest.raises(ValueError, match=message):
+        load_navs(nav_file)
+
+
+@pytest.mark.parametrize(
+    ("row", "message"),
+    [
+        ("2026-01-23,,12.3456", "scheme_id is required"),
+        ("2026-01-23,sch-test,12.3456", "invalid scheme identifier"),
+        ("2026-01-23,SCH TEST,12.3456", "invalid scheme identifier"),
+        (",SCH-TEST,12.3456", "nav_date is required"),
+        ("2026/01/23,SCH-TEST,12.3456", "invalid NAV date"),
+        ("2026-02-30,SCH-TEST,12.3456", "invalid NAV date"),
+        ("20260123,SCH-TEST,12.3456", "must use YYYY-MM-DD"),
+        ("2026-01-23,SCH-TEST,", "NAV value is required"),
+        ("2026-01-23,SCH-TEST,  ", "NAV value is required"),
+        ("2026-01-23,SCH-TEST,$12.3456", "valid decimal"),
+        ("2026-01-23,SCH-TEST,12", "four decimal places"),
+        ("2026-01-23,SCH-TEST,12.3", "four decimal places"),
+        ("2026-01-23,SCH-TEST,12.345", "four decimal places"),
+        ("2026-01-23,SCH-TEST,12.34567", "four decimal places"),
+        ("2026-01-23,SCH-TEST,0.0000", "greater than zero"),
+        ("2026-01-23,SCH-TEST,-0.0001", "greater than zero"),
+    ],
+)
+def test_detailed_nav_validation_rules(tmp_path, row, message):
+    nav_file = _write_nav_file(tmp_path / "navs.csv", [row])
+    with pytest.raises(ValueError, match=message):
+        load_navs(nav_file)
+
+
+def test_missing_nav_file_raises_error(tmp_path):
+    missing_file = tmp_path / "nonexistent_nav.csv"
+    with pytest.raises(ValueError, match="NAV file not found"):
+        load_navs(missing_file)
+
+
+def test_missing_nav_date_for_existing_scheme_raises_error(tmp_path):
+    nav_file = _write_nav_file(
+        tmp_path / "navs.csv", ["2026-01-23,SCH-TEST,12.3456"]
+    )
+    with pytest.raises(ValueError, match="NAV not found for scheme SCH-TEST on 2026-01-24"):
+        get_nav_value("SCH-TEST", date(2026, 1, 24), nav_file)
+
+
+def test_load_multiple_valid_schemes_and_dates(tmp_path):
+    nav_file = _write_nav_file(
+        tmp_path / "navs.csv",
+        [
+            "2026-01-23,SCH-01,10.0000",
+            "2026-01-24,SCH-01,10.1234",
+            "2026-01-23,SCH-02,25.5000",
+        ],
+    )
+    data = load_navs(nav_file)
+    assert len(data) == 3
+    assert data[("SCH-01", date(2026, 1, 23))] == Decimal("10.0000")
+    assert data[("SCH-01", date(2026, 1, 24))] == Decimal("10.1234")
+    assert data[("SCH-02", date(2026, 1, 23))] == Decimal("25.5000")
+    assert get_nav_value("SCH-01", date(2026, 1, 24), nav_file) == Decimal("10.1234")
