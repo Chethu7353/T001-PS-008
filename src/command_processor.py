@@ -10,6 +10,12 @@ from src.exit_load_engine import ExitLoadSchedule, load_exit_loads
 from src.lot_manager import LotManager, get_elss_lock_in_date
 from src.models import Folio, InvestmentLot, Scheme, SchemeType
 from src.nav_engine import get_applicable_nav_date, load_holidays, load_navs
+from src.purchase_engine import (
+    calculate_investible_amount,
+    calculate_purchase,
+    calculate_stamp_duty,
+    calculate_units,
+)
 from src.redemption_engine import calculate_payout_date
 from src.sip_engine import SIPManager
 from src.switch_engine import process_switch
@@ -163,9 +169,16 @@ class CommandProcessor:
             use_calendar_day_for_liquid=True,
         )
         nav = self.get_nav(scheme_id, nav_date)
-        stamp_duty = (amount * STAMP_DUTY_RATE).quantize(PAISE, rounding=ROUND_HALF_UP)
-        investible = amount - stamp_duty
-        units = (investible / nav).quantize(UNIT_PRECISION, rounding=ROUND_DOWN)
+        calc = calculate_purchase(
+            amount=amount,
+            nav=nav,
+            is_first_purchase=is_first,
+            min_first_purchase=scheme.min_first_purchase,
+            min_additional=scheme.min_additional,
+        )
+        stamp_duty = calc["stamp_duty"]
+        investible = calc["investible_amount"]
+        units = calc["units"]
 
         lot = InvestmentLot(
             lot_id=order_id,
@@ -473,9 +486,9 @@ class CommandProcessor:
                 use_calendar_day_for_liquid=True,
             )
             nav = self.get_nav(sip.scheme_id, nav_date)
-            stamp_duty = (sip.amount * STAMP_DUTY_RATE).quantize(PAISE, rounding=ROUND_HALF_UP)
-            investible = sip.amount - stamp_duty
-            units = (investible / nav).quantize(UNIT_PRECISION, rounding=ROUND_DOWN)
+            stamp_duty = calculate_stamp_duty(sip.amount)
+            investible = calculate_investible_amount(sip.amount, stamp_duty)
+            units = calculate_units(investible, nav)
 
             lot = InvestmentLot(
                 lot_id=order_id,
