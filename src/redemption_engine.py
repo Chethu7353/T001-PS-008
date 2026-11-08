@@ -14,15 +14,21 @@ PAISE = Decimal("0.01")
 
 
 def validate_redemption_amount(amount: Decimal) -> None:
-    """Reject non-positive redemption amounts."""
+    """Reject non-finite and non-positive redemption amounts."""
+    if not amount.is_finite():
+        raise ValueError("Redemption amount must be a finite number")
     if amount <= 0:
         raise ValueError("Redemption amount must be greater than zero")
 
 
 def calculate_redemption_amount(units: Decimal, nav: Decimal) -> Decimal:
     """Return the rupee amount for the units redeemed at the given NAV."""
+    if not units.is_finite():
+        raise ValueError("Redemption units must be a finite number")
     if units <= 0:
         raise ValueError("Redemption units must be greater than zero")
+    if not nav.is_finite():
+        raise ValueError("NAV must be a finite number")
     if nav <= 0:
         raise ValueError("NAV must be greater than zero")
     return (units * nav).quantize(PAISE, rounding=ROUND_HALF_UP)
@@ -50,10 +56,16 @@ def redeem_units(
     nav: Decimal,
 ) -> dict[str, Decimal]:
     """Validate a unit-based redemption and calculate its payout amount."""
+    if not available_units.is_finite():
+        raise ValueError("Available units must be a finite number")
     if available_units <= 0:
         raise ValueError("Investor has no available units")
+    if not units_to_redeem.is_finite():
+        raise ValueError("Redemption units must be a finite number")
     if units_to_redeem <= 0:
         raise ValueError("Redemption units must be greater than zero")
+    if not nav.is_finite():
+        raise ValueError("NAV must be a finite number")
     if nav <= 0:
         raise ValueError("NAV must be greater than zero")
     if units_to_redeem > available_units:
@@ -80,8 +92,12 @@ def redeem_by_amount(
 ) -> dict[str, Decimal]:
     """Convert a rupee amount into units and validate the redemption."""
     validate_redemption_amount(amount)
+    if not available_units.is_finite():
+        raise ValueError("Available units must be a finite number")
     if available_units <= 0:
         raise ValueError("Investor has no available units")
+    if not nav.is_finite():
+        raise ValueError("NAV must be a finite number")
     if nav <= 0:
         raise ValueError("NAV must be greater than zero")
 

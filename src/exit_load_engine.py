@@ -58,6 +58,12 @@ def calculate_lot_exit_load(
     schedules: Sequence[ExitLoadSchedule],
 ) -> Decimal:
     """Calculate exit load in rupees for given units and NAV, rounded to paise."""
+    if not units.is_finite() or not nav.is_finite():
+        raise ValueError("Units and NAV must be finite numbers")
+    if units <= Decimal("0") or nav <= Decimal("0"):
+        return Decimal("0.00")
+    if days_held < 0:
+        raise ValueError("Days held cannot be negative")
     gross = (units * nav).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     load_pct = get_exit_load_pct(scheme_type, days_held, schedules)
     if load_pct <= 0:

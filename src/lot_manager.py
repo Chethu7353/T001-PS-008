@@ -104,6 +104,13 @@ class LotManager:
         nav: Decimal,
     ) -> Decimal:
         """Deplete units in FIFO order and return total exit load incurred."""
+        if not units_to_redeem.is_finite() or not nav.is_finite():
+            raise ValueError("Units and NAV must be finite numbers")
+        if units_to_redeem <= Decimal("0"):
+            raise ValueError("Units to redeem must be greater than zero")
+        if nav <= Decimal("0"):
+            raise ValueError("NAV must be greater than zero")
+
         key = (folio_id, scheme_id)
         if key not in self.lots:
             raise ValueError("No lots found for folio and scheme")

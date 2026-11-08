@@ -9,7 +9,7 @@
 | BR-05 | NAV file validation, duplicate handling, and missing NAV behavior. Records must have valid uppercase scheme identifiers, strict YYYY-MM-DD dates, strictly positive finite decimal values with exactly 4 decimal places, and unique (scheme_id, nav_date) pairs. Missing NAV at order execution raises a lookup error. | Implemented in Day 6 (with documented open questions) |
 | BR-06 | Holiday calendar update and invalid-date handling. | Pending mentor clarification |
 | BR-07 | Purchase order eligibility, minimum amount thresholds, stamp duty, unit rounding down, and lot creation. | Implemented & Verified in Day 3 (with documented open questions) |
-| BR-08 | Redemption eligibility, available units, and payout rules. | Pending mentor clarification |
+| BR-08 | Redemption eligibility, available units, ceiling rounding, FIFO deductions, and payout rules. | Implemented & Verified in Day 4 (with documented open questions) |
 | BR-09 | Scheme switch processing and related NAV dates. | Pending mentor clarification |
 | BR-10 | SIP schedule, missed installment, and processing rules. | Pending mentor clarification |
 | BR-11 | FIFO lot selection, exit load, ELSS lock-in, and investor confirmations. | Pending mentor clarification |
@@ -62,3 +62,38 @@ For weekend or holiday timestamps, Day 2 currently advances to the next business
 1. **Zero-Holding Re-Entry Status**: If an investor previously held lots in a scheme but completely redeemed all units to 0.000, should a new purchase be treated as a "first-time purchase" (requiring ₹5,000) or an "additional purchase" (requiring ₹1,000)? (Current implementation checks current non-zero holdings, requiring ₹5,000).
 2. **Pre-Deduction Fee Applicability**: Does stamp duty apply to SIP instalments and switch-in transactions? (Current implementation applies 0.005% stamp duty uniformly across lump-sum purchases, SIP purchases, and switch-in purchases as per SEBI regulations).
 3. **Fractional Rupee Precision in Order Input**: If an input amount contains fractions beyond paisa (e.g. ₹5,000.005), should the order be rejected upfront for invalid currency formatting or quantized?
+
+## BR-08: Redemption Processing Rules
+
+### Confirmed Implementation Behavior
+1. **Redemption Modes**:
+   - `ALL`: Redeems 100% of available unlocked units in the folio for that scheme. Permitted even if the total holding value is below ₹1,000.
+   - `UNITS`: Investor specifies units up to 3 decimal places. Requested units must not exceed available unlocked units. If requested units are less than the total available units, the gross value must be at least ₹1,000.00 (`min_redemption`).
+   - `AMOUNT`: Investor specifies redemption amount in rupees. Converted to units using ceiling rounding: `units = ceil_3(amount / nav)`. If required units exceed available unlocked units, the order is rejected.
+2. **Amount-to-Units Ceiling Rounding (ROUND_CEILING)**:
+   - When redeeming by amount, units are rounded **UP** (`ROUND_CEILING`) to 3 decimal places (`0.001`). This ensures that the gross proceeds meet or exceed the investor's requested redemption cash amount.
+   - **EC-05 Insufficient Units Defense**: If `units_needed` exceeds `available_units` even by `0.001` (e.g. `708.740` required vs `708.739` available), the order is immediately rejected with `rule_ids = BR-08`.
+3. **Partial vs Full Redemption Minimums**:
+   - Partial redemptions (leaving positive units remaining) must have a gross redemption value of at least ₹1,000.00 (`min_redemption`).
+   - Full redemptions (`mode == "ALL"` or redeeming all units) are exempted from the ₹1,000 minimum threshold.
+4. **FIFO Lot Depletion and Exit Loads**:
+   - Units are deducted in First-In, First-Out (FIFO) order sorted by `(allotment_date, lot_id)`.
+   - Exit load is calculated individually per lot based on holding days: `days_held = (nav_date - allotment_date).days`.
+   - **EC-04 Exit Load Holding Days Boundary**:
+     - For Equity funds (`[0, 365]` days band at 1.0000%):
+       - Day 365: exactly on the 365th day $\implies$ 1.00% exit load is deducted.
+       - Day 366: on the 366th day $\implies$ nil (0.00%) exit load.
+   - Total exit load is the sum of exit loads across all depleted lots, rounded to the nearest paisa (`ROUND_HALF_UP`).
+5. **Net Payout Calculation**:
+   - `gross_amount = (units_to_redeem * nav).quantize(0.01, ROUND_HALF_UP)`
+   - `net_amount = gross_amount - total_exit_load`
+6. **Payout Date Schedule**:
+   - Equity schemes: $T + 2$ business days.
+   - Debt & Liquid schemes: $T + 1$ business day.
+   - Advances only across official market business days (skipping weekends and dates in `holidays.csv`).
+7. **Rejection Behavior**:
+   - Orders failing unit availability or minimum value are recorded in `confirmations.csv` with `decision = REJECTED` and `rule_ids = BR-08` (or `BR-11` if locked under ELSS). Numerical and payout date fields are empty.
+
+### Unresolved Specification Questions (Mentor Clarifications Needed)
+1. **ELSS Units Partial Lock-in Rejection Code**: When a folio holds units in an ELSS scheme, but all of them are within the 3-year lock-in period, should the rejection rule code be `BR-08` (insufficient units) or `BR-11` (ELSS lock-in)? (Current implementation reports `BR-11` when holdings exist but are locked).
+2. **Weekend/Holiday Payout Initiation**: If an order arrives on a weekend/holiday, does the $T+1$ or $T+2$ counter begin from the transaction/nav date or from the next business day? (Current implementation computes $T+n$ business days from the applicable NAV date).
