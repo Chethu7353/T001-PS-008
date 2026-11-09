@@ -59,6 +59,15 @@ class LotManager:
 
     def add_lot(self, lot: InvestmentLot) -> None:
         """Add a lot to the portfolio."""
+        if not lot.units.is_finite() or not lot.purchase_nav.is_finite():
+            raise ValueError("Lot units and purchase NAV must be finite numbers")
+        if lot.units <= Decimal("0"):
+            raise ValueError("Lot units must be greater than zero")
+        if lot.purchase_nav <= Decimal("0"):
+            raise ValueError("Lot purchase NAV must be greater than zero")
+        if not isinstance(lot.allotment_date, date):
+            raise ValueError("Lot allotment date must be a valid date")
+
         key = (lot.folio_id, lot.scheme_id)
         if key not in self.lots:
             self.lots[key] = []
@@ -114,6 +123,24 @@ class LotManager:
         key = (folio_id, scheme_id)
         if key not in self.lots:
             raise ValueError("No lots found for folio and scheme")
+
+        # Pre-flight check: verify date consistency on candidate lots before modifying state
+        for lot in self.lots[key]:
+            if lot.units <= 0:
+                continue
+            if is_lot_locked(lot, as_of_date, scheme):
+                continue
+            if as_of_date < lot.allotment_date:
+                raise ValueError(
+                    f"Redemption date {as_of_date.isoformat()} is earlier than lot allotment date {lot.allotment_date.isoformat()}"
+                )
+
+        # Pre-flight check: ensure sufficient unlocked units are available before modifying state
+        available_unlocked = self.get_available_unlocked_units(
+            folio_id, scheme_id, as_of_date, scheme
+        )
+        if units_to_redeem > available_unlocked:
+            raise ValueError("Insufficient unlocked units available to deplete")
 
         remaining_to_redeem = units_to_redeem
         total_exit_load = Decimal("0.00")

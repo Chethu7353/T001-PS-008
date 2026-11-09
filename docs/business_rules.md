@@ -12,7 +12,7 @@
 | BR-08 | Redemption eligibility, available units, ceiling rounding, FIFO deductions, and payout rules. | Implemented & Verified in Day 4 (with documented open questions) |
 | BR-09 | Scheme switch processing and related NAV dates. | Pending mentor clarification |
 | BR-10 | SIP schedule, missed installment, and processing rules. | Pending mentor clarification |
-| BR-11 | FIFO lot selection, exit load, ELSS lock-in, and investor confirmations. | Pending mentor clarification |
+| BR-11 | FIFO lot selection, exit load, ELSS lock-in, and investor confirmations. | Implemented & Verified in Day 5 (with documented open questions) |
 
 For weekend or holiday timestamps, Day 2 currently advances to the next business day for Equity/Debt and Liquid after-cutoff orders. Liquid before-cutoff on a non-business date also advances to the next business day. This is an implementation assumption because the assignment does not state those cases; confirm with the mentor.
 
@@ -97,3 +97,31 @@ For weekend or holiday timestamps, Day 2 currently advances to the next business
 ### Unresolved Specification Questions (Mentor Clarifications Needed)
 1. **ELSS Units Partial Lock-in Rejection Code**: When a folio holds units in an ELSS scheme, but all of them are within the 3-year lock-in period, should the rejection rule code be `BR-08` (insufficient units) or `BR-11` (ELSS lock-in)? (Current implementation reports `BR-11` when holdings exist but are locked).
 2. **Weekend/Holiday Payout Initiation**: If an order arrives on a weekend/holiday, does the $T+1$ or $T+2$ counter begin from the transaction/nav date or from the next business day? (Current implementation computes $T+n$ business days from the applicable NAV date).
+
+## BR-11: FIFO, Exit Load, and ELSS Lock-in Rules
+
+### Confirmed Implementation Behavior
+1. **FIFO Lot Ordering**:
+   - Lots within each `(folio_id, scheme_id)` holding are strictly ordered by `(allotment_date, lot_id)`.
+   - When a redemption or switch-out occurs, units are depleted starting from the earliest available lot.
+   - Depleted lots whose units reach `0.000` are retained in history but omitted from active holdings statements.
+2. **Transactional State Integrity**:
+   - `LotManager.add_lot()` strictly validates that `units` and `purchase_nav` are finite positive decimals, and `allotment_date` is a valid date.
+   - `deplete_units_fifo` executes pre-flight checks before altering state: if available unlocked units are insufficient or if the redemption date is earlier than an allotment date, execution halts with a `ValueError` without mutating any lot in the portfolio.
+3. **Exit Load Schedule Evaluation**:
+   - Exit load is determined on a per-lot basis using holding days: `days_held = (nav_date - allotment_date).days`.
+   - Schedules are loaded directly from `exit_loads.csv` without hardcoding:
+     - **Equity**: `[0, 365]` days $\implies$ 1.0000%; day 366+ $\implies$ nil (0.00%).
+     - **Debt**: `[0, 30]` days $\implies$ 0.2500%; day 31+ $\implies$ nil (0.00%).
+     - **Liquid**: Graded scale from day 1 (0.0070%) down to day 6 (0.0045%); day 7+ $\implies$ nil (0.00%).
+   - The gross redemption amount per lot slice is quantized to paise (`PAISE = Decimal("0.01")`, `ROUND_HALF_UP`), and the resulting exit load is quantized to paise.
+4. **ELSS Three-Year Statutory Lock-in (EC-07)**:
+   - Units invested in an ELSS scheme (`elss = True`) are legally locked for exactly three calendar years from their allotment date.
+   - Lock-in date formula: `allotment_date.replace(year=allotment_date.year + 3)`. For leap-day allotments (`Feb 29`), the lock-in expires on `Feb 28` of the third year.
+   - A lot is locked if `as_of_date < lock_in_date`. On the exact 3-year anniversary (`as_of_date == lock_in_date`), the lot becomes unlocked and eligible for redemption.
+   - **Partial Redemptions & REDEEM ALL**: Redemptions (including `REDEEM ALL`) only consume unlocked lots. Locked lots remain untouched in the folio statement.
+   - **All-Locked Rejection**: If all holdings in an ELSS scheme are locked, redemption is rejected with `rule_ids = BR-11`.
+
+### Unresolved Specification Questions (Mentor Clarifications Needed)
+1. **ELSS Lot Allotment Tie-Breaking**: If an investor acquires multiple ELSS lots on the same calendar day (e.g. regular purchase and SIP debit), does sorting by `lot_id` provide sufficient determinism for audit and taxation reporting? (Current implementation uses `(allotment_date, lot_id)`).
+2. **Switch-Out with Mixed ELSS Holdings**: In a switch transaction where source ELSS units are partially locked, should the switch proceed up to the unlocked limit or reject the entire switch command? (Current implementation restricts redemptions and switches to available unlocked units).
