@@ -10,7 +10,7 @@
 | BR-06 | Holiday calendar update and invalid-date handling. | Pending mentor clarification |
 | BR-07 | Purchase order eligibility, minimum amount thresholds, stamp duty, unit rounding down, and lot creation. | Implemented & Verified in Day 3 (with documented open questions) |
 | BR-08 | Redemption eligibility, available units, ceiling rounding, FIFO deductions, and payout rules. | Implemented & Verified in Day 4 (with documented open questions) |
-| BR-09 | Scheme switch processing and related NAV dates. | Pending mentor clarification |
+| BR-09 | Scheme switch processing, dual confirmation records, exit load, stamp duty, and minimum investment waiver. | Implemented & Verified in Day 6 (with documented open questions) |
 | BR-10 | SIP schedule, missed installment, and processing rules. | Pending mentor clarification |
 | BR-11 | FIFO lot selection, exit load, ELSS lock-in, and investor confirmations. | Implemented & Verified in Day 5 (with documented open questions) |
 
@@ -125,3 +125,31 @@ For weekend or holiday timestamps, Day 2 currently advances to the next business
 ### Unresolved Specification Questions (Mentor Clarifications Needed)
 1. **ELSS Lot Allotment Tie-Breaking**: If an investor acquires multiple ELSS lots on the same calendar day (e.g. regular purchase and SIP debit), does sorting by `lot_id` provide sufficient determinism for audit and taxation reporting? (Current implementation uses `(allotment_date, lot_id)`).
 2. **Switch-Out with Mixed ELSS Holdings**: In a switch transaction where source ELSS units are partially locked, should the switch proceed up to the unlocked limit or reject the entire switch command? (Current implementation restricts redemptions and switches to available unlocked units).
+
+## BR-09: Mutual Fund Switch Processing Rules
+
+### Confirmed Implementation Behavior
+1. **Two-Legged Transaction Orchestration**:
+   - Every `SWITCH` command executes an atomic, sequential two-stage transaction:
+     1. **Source Redemption (`SWITCH_OUT`)**: Redeems units from the source fund using source scheme cut-off time and applicable NAV. Deducts applicable exit loads via FIFO lot depletion. Calculates target gross proceeds as `source_net = source_gross - exit_load`.
+     2. **Target Purchase (`SWITCH_IN`)**: Invests the exact net proceeds (`source_net`) into the target scheme at the target scheme's applicable NAV. Deducts regulatory 0.005% stamp duty and allocates units rounded down to 3 decimal places.
+2. **Dual Confirmation Records**:
+   - Exactly two rows are emitted in `confirmations.csv` for each switch command:
+     - Row 1: `txn_type = SWITCH_OUT`, reporting source gross amount, exit load, net proceeds, and settlement payout date ($T+2$ or $T+1$).
+     - Row 2: `txn_type = SWITCH_IN`, reporting target gross amount, stamp duty, units, and empty payout date.
+     - Both rows share the same `order_id` and `folio_id`.
+3. **Official Edge Case EC-06 (Target Minimum Investment Waiver)**:
+   - Normal purchase minimum thresholds (₹5,000 for first purchase or ₹1,000 for additional purchase) are strictly **waived** for switch-in legs.
+   - Even if the source fund's exit load reduces net proceeds below ₹1,000.00 (e.g. ₹995.00 in `ORD-0008`), the switch succeeds and units are allotted in the target fund without rejection.
+4. **Validation & Rejection Rules**:
+   - **Same-Scheme Prevention**: Attempting to switch from a scheme to the exact same scheme (`from_scheme == to_scheme`) is rejected with `rule_ids = BR-09`.
+   - **ELSS Lock-in Handling**: Attempting to switch from an ELSS scheme where all holdings are locked within the 3-year period is rejected with `rule_ids = BR-11`.
+   - **Unit Availability**: Requests exceeding available unlocked units in `UNITS` or `AMOUNT` mode are rejected with `rule_ids = BR-08`.
+   - **Non-Finite & Zero Inputs**: Values such as `NaN`, `Infinity`, `<= 0` are safely rejected.
+   - When rejected, both `SWITCH_OUT` and `SWITCH_IN` rows are emitted with `decision = REJECTED` and empty financial/date columns.
+5. **Portfolio & State Preservation**:
+   - Rejected switches perform zero mutations on source or target folio holdings.
+
+### Unresolved Specification Questions (Mentor Clarifications Needed)
+1. **Asynchronous Settlement Inter-Day Lag**: In actual Indian banking/clearing systems, does a switch-in execute on the redemption settlement date (e.g. $T+2$) or immediately on order day $T$? (Current implementation follows the sample-pack model where target NAV is evaluated on order date $T$).
+2. **Switch Rejection Atomicity**: If a switch fails during target unit allotment, should the source redemption remain un-executed? (Current implementation evaluates validity upfront so either both legs succeed or both are rejected).

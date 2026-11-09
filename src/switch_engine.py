@@ -1,17 +1,21 @@
 """Switch transaction engine orchestrating source redemption and target purchase."""
 
 from datetime import date, datetime
-from decimal import Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 from typing import Sequence
 
 from src.exit_load_engine import ExitLoadSchedule
 from src.lot_manager import LotManager
-from src.models import Scheme
+from src.models import InvestmentLot, Scheme
 from src.nav_engine import get_applicable_nav_date
+from src.purchase_engine import (
+    calculate_investible_amount,
+    calculate_stamp_duty,
+    calculate_units,
+)
 from src.redemption_engine import calculate_payout_date
 
 
-STAMP_DUTY_RATE = Decimal("0.00005")  # 0.005%
 PAISE = Decimal("0.01")
 UNIT_PRECISION = Decimal("0.001")
 
@@ -30,6 +34,42 @@ def process_switch(
     holidays: set[date],
 ) -> tuple[dict, dict]:
     """Process a switch order producing SWITCH_OUT and SWITCH_IN confirmation records."""
+    # Reject switching from a scheme to the exact same scheme
+    if from_scheme.scheme_id == to_scheme.scheme_id:
+        out_record = {
+            "order_id": order_id,
+            "folio_id": folio_id,
+            "scheme_id": from_scheme.scheme_id,
+            "txn_type": "SWITCH_OUT",
+            "decision": "REJECTED",
+            "rule_ids": "BR-09",
+            "nav_date": "",
+            "nav": "",
+            "gross_amount": "",
+            "stamp_duty": "",
+            "units": "",
+            "exit_load": "",
+            "net_amount": "",
+            "payout_date": "",
+        }
+        in_record = {
+            "order_id": order_id,
+            "folio_id": folio_id,
+            "scheme_id": to_scheme.scheme_id,
+            "txn_type": "SWITCH_IN",
+            "decision": "REJECTED",
+            "rule_ids": "BR-09",
+            "nav_date": "",
+            "nav": "",
+            "gross_amount": "",
+            "stamp_duty": "",
+            "units": "",
+            "exit_load": "",
+            "net_amount": "",
+            "payout_date": "",
+        }
+        return out_record, in_record
+
     from_nav_date = get_applicable_nav_date(
         from_scheme.scheme_type,
         order_ts,
@@ -50,9 +90,15 @@ def process_switch(
     from_nav = get_nav_func(from_scheme.scheme_id, from_nav_date)
     to_nav = get_nav_func(to_scheme.scheme_id, to_nav_date)
 
-    # Determine units to redeem
+    # Determine units to redeem and rejection reason if invalid
     units_to_redeem = Decimal("0.000")
     is_valid = True
+    fail_rule = "BR-08"
+
+    # Check if units exist but are locked under ELSS
+    if available_units <= Decimal("0.000") and lot_manager.has_holding(folio_id, from_scheme.scheme_id):
+        if from_scheme.elss:
+            fail_rule = "BR-11"
 
     if mode == "ALL":
         if available_units <= Decimal("0.000"):
@@ -61,24 +107,27 @@ def process_switch(
             units_to_redeem = available_units
     elif mode == "UNITS":
         try:
-            req_units = Decimal(value).quantize(UNIT_PRECISION)
-            if req_units <= Decimal("0.000") or req_units > available_units:
+            req_units = Decimal(value)
+            if not req_units.is_finite() or req_units <= Decimal("0.000") or req_units > available_units:
                 is_valid = False
             else:
-                units_to_redeem = req_units
+                units_to_redeem = req_units.quantize(UNIT_PRECISION)
         except Exception:
             is_valid = False
     elif mode == "AMOUNT":
         try:
-            req_amount = Decimal(value).quantize(PAISE)
-            if req_amount <= Decimal("0.00"):
+            req_amount = Decimal(value)
+            if not req_amount.is_finite() or req_amount <= Decimal("0.00"):
                 is_valid = False
             else:
-                units_to_redeem = (req_amount / from_nav).quantize(
+                req_amount = req_amount.quantize(PAISE)
+                units_needed = (req_amount / from_nav).quantize(
                     UNIT_PRECISION, rounding=ROUND_CEILING
                 )
-                if units_to_redeem > available_units:
+                if units_needed > available_units:
                     is_valid = False
+                else:
+                    units_to_redeem = units_needed
         except Exception:
             is_valid = False
     else:
@@ -91,7 +140,7 @@ def process_switch(
             "scheme_id": from_scheme.scheme_id,
             "txn_type": "SWITCH_OUT",
             "decision": "REJECTED",
-            "rule_ids": "BR-08",
+            "rule_ids": fail_rule,
             "nav_date": "",
             "nav": "",
             "gross_amount": "",
@@ -107,7 +156,7 @@ def process_switch(
             "scheme_id": to_scheme.scheme_id,
             "txn_type": "SWITCH_IN",
             "decision": "REJECTED",
-            "rule_ids": "BR-08",
+            "rule_ids": fail_rule,
             "nav_date": "",
             "nav": "",
             "gross_amount": "",
@@ -153,17 +202,11 @@ def process_switch(
         "payout_date": source_payout.isoformat(),
     }
 
-    # Target purchase
+    # Target purchase (minimum investment is waived for switches)
     target_gross = source_net
-    target_stamp_duty = (target_gross * STAMP_DUTY_RATE).quantize(
-        PAISE, rounding=ROUND_HALF_UP
-    )
-    target_investible = target_gross - target_stamp_duty
-    target_units = (target_investible / to_nav).quantize(
-        UNIT_PRECISION, rounding=ROUND_DOWN
-    )
-
-    from src.models import InvestmentLot
+    target_stamp_duty = calculate_stamp_duty(target_gross)
+    target_investible = calculate_investible_amount(target_gross, target_stamp_duty)
+    target_units = calculate_units(target_investible, to_nav)
 
     target_lot = InvestmentLot(
         lot_id=order_id,

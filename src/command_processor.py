@@ -344,6 +344,47 @@ class CommandProcessor:
         """Process a SWITCH command."""
         self.commands_processed += 1
         order_ts = datetime.fromisoformat(order_ts_str)
+
+        if (
+            folio_id not in self.folios
+            or from_scheme_id not in self.schemes
+            or to_scheme_id not in self.schemes
+        ):
+            self.commands_rejected += 1
+            self.confirmations.append({
+                "order_id": order_id,
+                "folio_id": folio_id,
+                "scheme_id": from_scheme_id,
+                "txn_type": "SWITCH_OUT",
+                "decision": "REJECTED",
+                "rule_ids": "BR-09",
+                "nav_date": "",
+                "nav": "",
+                "gross_amount": "",
+                "stamp_duty": "",
+                "units": "",
+                "exit_load": "",
+                "net_amount": "",
+                "payout_date": "",
+            })
+            self.confirmations.append({
+                "order_id": order_id,
+                "folio_id": folio_id,
+                "scheme_id": to_scheme_id,
+                "txn_type": "SWITCH_IN",
+                "decision": "REJECTED",
+                "rule_ids": "BR-09",
+                "nav_date": "",
+                "nav": "",
+                "gross_amount": "",
+                "stamp_duty": "",
+                "units": "",
+                "exit_load": "",
+                "net_amount": "",
+                "payout_date": "",
+            })
+            return
+
         from_scheme = self.schemes[from_scheme_id]
         to_scheme = self.schemes[to_scheme_id]
 
