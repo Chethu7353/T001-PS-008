@@ -132,3 +132,4 @@ class SIP:
     consecutive_failures: int = 0
     paused_until_month: str | None = None
     paused_months: set[str] = field(default_factory=set)
+    paused_years: set[int] = field(default_factory=set)

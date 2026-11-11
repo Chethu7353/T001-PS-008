@@ -25,6 +25,8 @@ def calculate_scheduled_date(
     holidays: set[date],
 ) -> date:
     """Calculate the scheduled date for a SIP instalment, advancing to next business day."""
+    if not 1 <= month <= 12:
+        raise ValueError("Month must be between 1 and 12")
     if not 1 <= sip_day <= 31:
         raise ValueError("SIP day must be between 1 and 31")
     last_day = calendar.monthrange(year, month)[1]
@@ -42,20 +44,7 @@ def calculate_first_instalment_date(
     holidays: set[date],
 ) -> date:
     """Determine the first scheduled instalment date (must be >= 7 days after registration)."""
-    # Candidate in same month
-    cand = calculate_scheduled_date(
-        registered_date.year, registered_date.month, sip_day, holidays
-    )
-    if (cand - registered_date).days >= 7:
-        return cand
-
-    # Candidate in next month
-    year = registered_date.year
-    month = registered_date.month + 1
-    if month > 12:
-        month = 1
-        year += 1
-    return calculate_scheduled_date(year, month, sip_day, holidays)
+    return calculate_instalment_date(registered_date, sip_day, 1, holidays)
 
 
 def calculate_instalment_date(
@@ -67,6 +56,8 @@ def calculate_instalment_date(
     """Calculate an installment's adjusted date from its monthly cycle number."""
     if instalment_no < 1:
         raise ValueError("Instalment number must be at least one")
+    if not 1 <= sip_day <= 31:
+        raise ValueError("SIP day must be between 1 and 31")
 
     year, month = registered_date.year, registered_date.month
     number = 0
@@ -141,6 +132,8 @@ class SIPManager:
         self, sip_id: str, instalment_no: int, holidays: set[date]
     ) -> date:
         """Return the expected date for a SIP installment number."""
+        if sip_id not in self.sips:
+            raise ValueError(f"Unknown SIP ID: {sip_id}")
         sip = self.sips[sip_id]
         return calculate_instalment_date(
             sip.registered_date, sip.sip_day, instalment_no, holidays
@@ -158,7 +151,13 @@ class SIPManager:
         holidays: set[date],
     ) -> tuple[bool, str, date | None]:
         """Validate and register a new SIP."""
-        if amount < scheme.min_sip or not 1 <= sip_day <= 31:
+        if (
+            sip_id in self.sips
+            or not amount.is_finite()
+            or amount <= Decimal("0")
+            or amount < scheme.min_sip
+            or not 1 <= sip_day <= 31
+        ):
             return False, "REJECTED", None
 
         first_date = calculate_first_instalment_date(
@@ -184,14 +183,17 @@ class SIPManager:
         from_month: str,
         months: int,
     ) -> tuple[bool, str]:
-        """Pause a SIP for a given number of months (max 3 months allowed)."""
+        """Pause a SIP for a given number of months (max 3 months allowed, once per year)."""
         sip = self.sips.get(sip_id)
-        if not sip or months > 3 or months <= 0:
+        if not sip or sip.status != "ACTIVE" or months > 3 or months <= 0:
             return False, "REJECTED"
 
         try:
             first_month = datetime.strptime(from_month, "%Y-%m").date()
         except ValueError:
+            return False, "REJECTED"
+
+        if first_month.year in sip.paused_years:
             return False, "REJECTED"
 
         pause_months = set()
@@ -203,6 +205,7 @@ class SIPManager:
                 month = 1
                 year += 1
         sip.paused_months.update(pause_months)
+        sip.paused_years.add(first_month.year)
         sip.paused_until_month = max(sip.paused_months)
         return True, "ACCEPTED"
 
@@ -219,6 +222,9 @@ class SIPManager:
 
         if result not in {"SUCCESS", "FAILED"}:
             raise ValueError("SIP debit result must be SUCCESS or FAILED")
+
+        if sip.status == "CANCELLED":
+            return False, sip.consecutive_failures, sip.status
 
         if result == "SUCCESS":
             sip.consecutive_failures = 0

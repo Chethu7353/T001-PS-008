@@ -11,7 +11,7 @@
 | BR-07 | Purchase order eligibility, minimum amount thresholds, stamp duty, unit rounding down, and lot creation. | Implemented & Verified in Day 3 (with documented open questions) |
 | BR-08 | Redemption eligibility, available units, ceiling rounding, FIFO deductions, and payout rules. | Implemented & Verified in Day 4 (with documented open questions) |
 | BR-09 | Scheme switch processing, dual confirmation records, exit load, stamp duty, and minimum investment waiver. | Implemented & Verified in Day 6 (with documented open questions) |
-| BR-10 | SIP schedule, missed installment, and processing rules. | Pending mentor clarification |
+| BR-10 | SIP schedule, missed installment, pause/resume limits, and cancellation rules. | Implemented & Verified in Day 7 (with documented open questions) |
 | BR-11 | FIFO lot selection, exit load, ELSS lock-in, and investor confirmations. | Implemented & Verified in Day 5 (with documented open questions) |
 
 For weekend or holiday timestamps, Day 2 currently advances to the next business day for Equity/Debt and Liquid after-cutoff orders. Liquid before-cutoff on a non-business date also advances to the next business day. This is an implementation assumption because the assignment does not state those cases; confirm with the mentor.
@@ -153,3 +153,45 @@ For weekend or holiday timestamps, Day 2 currently advances to the next business
 ### Unresolved Specification Questions (Mentor Clarifications Needed)
 1. **Asynchronous Settlement Inter-Day Lag**: In actual Indian banking/clearing systems, does a switch-in execute on the redemption settlement date (e.g. $T+2$) or immediately on order day $T$? (Current implementation follows the sample-pack model where target NAV is evaluated on order date $T$).
 2. **Switch Rejection Atomicity**: If a switch fails during target unit allotment, should the source redemption remain un-executed? (Current implementation evaluates validity upfront so either both legs succeed or both are rejected).
+
+## BR-10: Systematic Investment Plan (SIP) Engine Rules
+
+### Confirmed Implementation Behavior
+1. **Registration & Validation**:
+   - Minimum installment amount: ₹500.00 (`amount >= scheme.min_sip`).
+   - Finite and strictly positive amounts (`amount > Decimal("0")` and `amount.is_finite()`).
+   - SIP installment day must be an integer between 1 and 31.
+   - Folio and scheme IDs must exist in system master records.
+   - Duplicate SIP ID registration attempts are rejected.
+2. **First Installment Scheduling (>= 7 Days Rule)**:
+   - First installment must be at least 7 days after registration (`(first_date - registered_date).days >= 7`).
+   - If the candidate date in the current month is less than 7 days from registration, scheduling moves forward to the subsequent month's cycle.
+3. **Monthly Scheduling, Clamping & Holiday Adjustment**:
+   - Installment dates are evaluated month by month.
+   - For months with fewer days than `sip_day`, the day is clamped to the last day of the month (e.g., February 31 $\implies$ February 28/29).
+   - If the scheduled date falls on a weekend (Saturday/Sunday) or an official holiday (from `holidays.csv`), it automatically rolls forward to the next business day.
+4. **Official Edge Case EC-03 (Month-End Clamping with Weekend Roll)**:
+   - SIP registered on 2026-01-31 with `sip_day = 31`:
+     - Feb 2026 has 28 days (Saturday Feb 28), advancing to Monday 2026-03-02 for Installment 1.
+     - Next monthly installment cycle correctly retains the original 31st target and executes on 2026-03-31 (Tuesday, business day).
+5. **Debit Result Tracking & Failure Auto-Cancellation**:
+   - Tracks consecutive debit failures on active SIPs.
+   - When consecutive failures reach 3 (`consecutive_failures >= 3`), the SIP is automatically transitioned to `CANCELLED` and no subsequent installments are scheduled or debited.
+   - A successful debit resets `consecutive_failures` immediately to 0.
+   - Once `CANCELLED`, debits cannot be recorded and pauses cannot be requested.
+6. **Official Edge Case EC-08 (Failure Counter Reset on Success)**:
+   - SIP with 2 initial failures receives a successful debit: consecutive failure counter resets to 0, status remains `ACTIVE`.
+   - Two subsequent failures occur: counter increments to 2, status remains `ACTIVE` (not cancelled, since 3 consecutive failures did not occur).
+7. **Pause and Resume Controls**:
+   - Pause duration must be between 1 and 3 months inclusive.
+   - An active SIP can only be paused once per calendar year.
+   - Pause requests on `CANCELLED` SIPs are rejected.
+   - The SIP returns to `ACTIVE` status once the pause window concludes.
+8. **Purchase Execution & State Integrity**:
+   - Each executed SIP installment follows standard purchase rules (BR-07): 0.005% stamp duty deducted, units rounded down to 3 decimal places, and an investment lot created.
+   - Unhandled exceptions are prevented; invalid registration or debit inputs fail safely without corrupting existing SIP or portfolio states.
+
+### Unresolved Specification Questions (Mentor Clarifications Needed)
+1. **In-Flight Debit Processing During Pause**: If an installment is already generated/scheduled before the pause request is registered on that day, does it execute or get cancelled? (Current implementation evaluates pause requests before executing corresponding debits).
+2. **Annual Pause Quota Scope**: Does "once per year" refer to calendar year (Jan 1 to Dec 31) or a rolling 12-month window? (Current implementation tracks calendar year of the first paused month).
+3. **Debit Resumption After Failure in Paused Window**: If a debit result is fed into the system for an installment in a month that was subsequently requested to be paused, should it be rejected or processed? (Current implementation skips debits outside active scheduling).

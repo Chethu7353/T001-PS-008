@@ -420,8 +420,40 @@ class CommandProcessor:
         """Process a SIP_REGISTER command."""
         self.commands_processed += 1
         reg_ts = datetime.fromisoformat(reg_ts_str)
-        amount = Decimal(amount_str)
-        sip_day = int(day_str)
+
+        if folio_id not in self.folios or scheme_id not in self.schemes:
+            self.commands_rejected += 1
+            self.sip_statuses.append({
+                "sip_id": sip_id,
+                "event": "SIP_REGISTER",
+                "instalment_no": "",
+                "scheduled_date": "",
+                "result": "REJECTED",
+                "order_id": "",
+                "consecutive_failures": "0",
+                "sip_status": "REJECTED",
+                "rule_ids": "BR-10",
+            })
+            return
+
+        try:
+            amount = Decimal(amount_str)
+            sip_day = int(day_str)
+        except Exception:
+            self.commands_rejected += 1
+            self.sip_statuses.append({
+                "sip_id": sip_id,
+                "event": "SIP_REGISTER",
+                "instalment_no": "",
+                "scheduled_date": "",
+                "result": "REJECTED",
+                "order_id": "",
+                "consecutive_failures": "0",
+                "sip_status": "REJECTED",
+                "rule_ids": "BR-10",
+            })
+            return
+
         scheme = self.schemes[scheme_id]
 
         ok, decision, first_date = self.sip_manager.register_sip(
