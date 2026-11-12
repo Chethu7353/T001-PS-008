@@ -5,7 +5,7 @@
 | BR-01 | NAV cut-off: Equity and Debt use 3:00 PM. Before cut-off uses same business day's NAV; at/after cut-off uses the next business day's NAV. Liquid uses 1:30 PM; before cut-off uses the previous business day's NAV; at/after uses the next business day's NAV. | Implemented in Day 2 |
 | BR-02 | Choose the applicable decision time using the later of order received and funds realised timestamps. | Implemented in Day 2 |
 | BR-03 | A business day is Monday to Friday except dates listed in the holiday CSV. | Implemented for calendar helpers; confirm official calendar source with mentor |
-| BR-04 | Scheme registration fields and validation rules. | Pending mentor clarification |
+| BR-04 | Scheme registration fields, cut-off times, category constraints, and minimum investment thresholds. | Implemented & Verified in Day 8 (with documented open questions) |
 | BR-05 | NAV file validation, duplicate handling, and missing NAV behavior. Records must have valid uppercase scheme identifiers, strict YYYY-MM-DD dates, strictly positive finite decimal values with exactly 4 decimal places, and unique (scheme_id, nav_date) pairs. Missing NAV at order execution raises a lookup error. | Implemented in Day 6 (with documented open questions) |
 | BR-06 | Holiday calendar update and invalid-date handling. | Pending mentor clarification |
 | BR-07 | Purchase order eligibility, minimum amount thresholds, stamp duty, unit rounding down, and lot creation. | Implemented & Verified in Day 3 (with documented open questions) |
@@ -195,3 +195,37 @@ For weekend or holiday timestamps, Day 2 currently advances to the next business
 1. **In-Flight Debit Processing During Pause**: If an installment is already generated/scheduled before the pause request is registered on that day, does it execute or get cancelled? (Current implementation evaluates pause requests before executing corresponding debits).
 2. **Annual Pause Quota Scope**: Does "once per year" refer to calendar year (Jan 1 to Dec 31) or a rolling 12-month window? (Current implementation tracks calendar year of the first paused month).
 3. **Debit Resumption After Failure in Paused Window**: If a debit result is fed into the system for an installment in a month that was subsequently requested to be paused, should it be rejected or processed? (Current implementation skips debits outside active scheduling).
+
+## BR-04: Scheme Registration Fields and Validation Rules
+
+### Confirmed Implementation Behavior
+1. **Scheme Identifier Validation**:
+   - Every scheme must possess a non-empty, uppercase `scheme_id` without internal whitespace (e.g. `SCH-01`, `SCH-02`).
+   - Scheme identifiers must be unique across the entire master file; duplicates are immediately rejected with `ValueError`.
+2. **Scheme Name**:
+   - `scheme_name` must be a non-empty string describing the fund.
+3. **Scheme Type & Category Integrity**:
+   - Must be one of the supported asset categories: `EQUITY`, `DEBT`, or `LIQUID` (matching the `SchemeType` enum).
+   - Unknown or malformed scheme types (e.g. `HYBRID`, lowercase `equity`) raise `ValueError`.
+4. **ELSS Category Restriction**:
+   - The `elss` flag must be a boolean (`true`/`false`, case-insensitive).
+   - Under regulatory and domain rules, only `EQUITY` schemes can be flagged as ELSS (`elss=True`).
+   - If a `DEBT` or `LIQUID` fund is registered with `elss=True`, validation immediately raises `ValueError("only EQUITY schemes can be ELSS")`.
+5. **Cut-off Time Alignment with BR-01**:
+   - `EQUITY` schemes must specify a cut-off time of `15:00:00`.
+   - `DEBT` schemes must specify a cut-off time of `15:00:00`.
+   - `LIQUID` schemes must specify a cut-off time of `13:30:00`.
+   - Any cut-off time deviating from statutory cut-offs raises `ValueError`.
+6. **Financial Investment Thresholds**:
+   - `min_first_purchase`, `min_additional`, `min_sip`, and `min_redemption` must be valid, finite `Decimal` values.
+   - Values must be strictly greater than zero (`> 0`).
+   - Currency values must have exactly two decimal places (`exponent == -2`), enforcing paise precision (rejecting fractions like `5000.005` or integers like `5000`).
+   - `min_additional` cannot exceed `min_first_purchase`.
+   - `min_sip` cannot be lower than the regulatory floor of ₹500.00 (enforcing BR-10 minimum).
+7. **Fail-Fast Ingestion Integrity**:
+   - Missing required CSV columns, missing schemes files, or corrupted records cause `load_schemes()` to fail fast at startup with explicit, row-numbered error messages, ensuring no orders execute against corrupted scheme master definitions.
+
+### Unresolved Specification Questions (Mentor Clarifications Needed)
+1. **Dynamic / Runtime Scheme Registration**: In a live operational environment, can new schemes be registered mid-stream via command file or API, or is scheme registration strictly restricted to static reference CSV ingestion? (Current implementation loads schemes at startup).
+2. **Custom Cut-off Times for Specific Schemes**: Do special funds (e.g. international equity funds or fund-of-funds) ever deviate from the standard 15:00:00 / 13:30:00 cut-offs? (Current implementation strictly enforces BR-01 cut-offs).
+3. **Multi-Currency Schemes**: Does the AMC plan to support USD or overseas feeder funds where minimum thresholds require non-INR or higher precision? (Current implementation enforces INR 2-decimal paise precision).

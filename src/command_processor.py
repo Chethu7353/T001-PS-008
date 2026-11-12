@@ -17,6 +17,7 @@ from src.purchase_engine import (
     calculate_units,
 )
 from src.redemption_engine import calculate_payout_date
+from src.scheme_engine import load_schemes
 from src.sip_engine import SIPManager
 from src.switch_engine import process_switch
 
@@ -68,20 +69,7 @@ class CommandProcessor:
         # Schemes
         schemes_file = self.data_dir / "schemes.csv"
         if schemes_file.exists():
-            with schemes_file.open(newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    self.schemes[row["scheme_id"]] = Scheme(
-                        scheme_id=row["scheme_id"],
-                        name=row["scheme_name"],
-                        scheme_type=SchemeType(row["scheme_type"]),
-                        elss=row["elss"].strip().lower() == "true",
-                        cutoff_time=time.fromisoformat(row["cutoff_time"].strip()),
-                        min_first_purchase=Decimal(row["min_first_purchase"]),
-                        min_additional=Decimal(row["min_additional"]),
-                        min_sip=Decimal(row["min_sip"]),
-                        min_redemption=Decimal(row["min_redemption"]),
-                    )
+            self.schemes = load_schemes(schemes_file)
 
         # Folios
         folios_file = self.data_dir / "folios.csv"
