@@ -9,7 +9,11 @@ from typing import Iterable
 from src.models import SchemeType
 
 
-DEFAULT_HOLIDAYS_FILE = Path(__file__).resolve().parent.parent / "data" / "holidays.csv"
+DEFAULT_HOLIDAYS_FILE = (
+    Path(__file__).resolve().parent.parent / "data" / "sample_pack" / "holidays.csv"
+)
+if not DEFAULT_HOLIDAYS_FILE.exists():
+    DEFAULT_HOLIDAYS_FILE = Path(__file__).resolve().parent.parent / "data" / "holidays.csv"
 DEFAULT_NAV_FILE = (
     Path(__file__).resolve().parent.parent / "data" / "sample_pack" / "navs.csv"
 )
@@ -18,32 +22,63 @@ if not DEFAULT_NAV_FILE.exists():
 
 
 def load_holidays(holidays_file: Path = DEFAULT_HOLIDAYS_FILE) -> set[date]:
-    """CSV ಫೈಲ್‌ನ `date` ಕಾಲಮ್‌ನಿಂದ ರಜಾದಿನಗಳನ್ನು ಓದುತ್ತದೆ."""
-    holidays = set()
-    files_to_try = [holidays_file]
-    sample_pack_holidays = (
-        Path(__file__).resolve().parent.parent / "data" / "sample_pack" / "holidays.csv"
-    )
-    if sample_pack_holidays != holidays_file and sample_pack_holidays.exists():
-        files_to_try.append(sample_pack_holidays)
+    """Load holiday dates from CSV file, validating date format and duplicates (BR-06)."""
+    if not holidays_file.exists():
+        raise ValueError(f"Holidays file not found: {holidays_file}")
 
-    for file_path in files_to_try:
-        if not file_path.exists():
-            continue
-        with file_path.open(newline="", encoding="utf-8") as file:
-            for row in csv.DictReader(file):
-                if "date" in row and row["date"].strip():
-                    holidays.add(date.fromisoformat(row["date"].strip()))
+    holidays: set[date] = set()
+    with holidays_file.open(newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        if reader.fieldnames is None:
+            raise ValueError(f"Holidays file {holidays_file} is empty")
+        if "date" not in reader.fieldnames:
+            raise ValueError("Holidays file missing required column: 'date'")
+
+        for row_number, row in enumerate(reader, start=2):
+            raw_date = row.get("date")
+            date_text = (raw_date or "").strip()
+            if not date_text:
+                raise ValueError(f"Holidays row {row_number}: date is required")
+
+            try:
+                holiday_date = date.fromisoformat(date_text)
+            except ValueError as error:
+                raise ValueError(
+                    f"Holidays row {row_number}: invalid date '{date_text}'"
+                ) from error
+
+            if holiday_date.isoformat() != date_text:
+                raise ValueError(
+                    f"Holidays row {row_number}: invalid date format '{date_text}' (must use YYYY-MM-DD)"
+                )
+
+            name = (row.get("holiday_name") or row.get("description") or "").strip()
+            if (
+                "holiday_name" in reader.fieldnames or "description" in reader.fieldnames
+            ) and not name:
+                raise ValueError(f"Holidays row {row_number}: holiday name is required")
+
+            if holiday_date in holidays:
+                raise ValueError(
+                    f"Holidays row {row_number}: duplicate holiday for date '{date_text}'"
+                )
+
+            holidays.add(holiday_date)
+
     return holidays
 
 
 def is_business_day(day: date, holidays: Iterable[date] = ()) -> bool:
-    """ದಿನವು ವಾರಾಂತ್ಯ ಅಥವಾ ರಜಾದಿನವಲ್ಲದಿದ್ದರೆ True ನೀಡುತ್ತದೆ."""
+    """Return True if day is Monday-Friday and not listed in holidays."""
+    if not isinstance(day, date):
+        raise ValueError("Day must be a date instance")
     return day.weekday() < 5 and day not in holidays
 
 
 def next_business_day(day: date, holidays: Iterable[date] = ()) -> date:
-    """ಕೊಟ್ಟ ದಿನದ ನಂತರ ಬರುವ ಮೊದಲ ಕೆಲಸದ ದಿನವನ್ನು ನೀಡುತ್ತದೆ."""
+    """Return the first business day strictly after the given date."""
+    if not isinstance(day, date):
+        raise ValueError("Day must be a date instance")
     candidate = day + timedelta(days=1)
     holiday_set = set(holidays)
     while not is_business_day(candidate, holiday_set):
@@ -52,7 +87,9 @@ def next_business_day(day: date, holidays: Iterable[date] = ()) -> date:
 
 
 def previous_business_day(day: date, holidays: Iterable[date] = ()) -> date:
-    """ಕೊಟ್ಟ ದಿನದ ಮೊದಲು ಬರುವ ಮೊದಲ ಕೆಲಸದ ದಿನವನ್ನು ನೀಡುತ್ತದೆ."""
+    """Return the first business day strictly before the given date."""
+    if not isinstance(day, date):
+        raise ValueError("Day must be a date instance")
     candidate = day - timedelta(days=1)
     holiday_set = set(holidays)
     while not is_business_day(candidate, holiday_set):

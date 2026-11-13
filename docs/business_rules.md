@@ -7,7 +7,7 @@
 | BR-03 | A business day is Monday to Friday except dates listed in the holiday CSV. | Implemented for calendar helpers; confirm official calendar source with mentor |
 | BR-04 | Scheme registration fields, cut-off times, category constraints, and minimum investment thresholds. | Implemented & Verified in Day 8 (with documented open questions) |
 | BR-05 | NAV file validation, duplicate handling, and missing NAV behavior. Records must have valid uppercase scheme identifiers, strict YYYY-MM-DD dates, strictly positive finite decimal values with exactly 4 decimal places, and unique (scheme_id, nav_date) pairs. Missing NAV at order execution raises a lookup error. | Implemented in Day 6 (with documented open questions) |
-| BR-06 | Holiday calendar update and invalid-date handling. | Pending mentor clarification |
+| BR-06 | Holiday calendar file validation, strict date formatting, duplicate detection, and business day calculations. | Implemented & Verified in Day 9 (with documented open questions) |
 | BR-07 | Purchase order eligibility, minimum amount thresholds, stamp duty, unit rounding down, and lot creation. | Implemented & Verified in Day 3 (with documented open questions) |
 | BR-08 | Redemption eligibility, available units, ceiling rounding, FIFO deductions, and payout rules. | Implemented & Verified in Day 4 (with documented open questions) |
 | BR-09 | Scheme switch processing, dual confirmation records, exit load, stamp duty, and minimum investment waiver. | Implemented & Verified in Day 6 (with documented open questions) |
@@ -229,3 +229,35 @@ For weekend or holiday timestamps, Day 2 currently advances to the next business
 1. **Dynamic / Runtime Scheme Registration**: In a live operational environment, can new schemes be registered mid-stream via command file or API, or is scheme registration strictly restricted to static reference CSV ingestion? (Current implementation loads schemes at startup).
 2. **Custom Cut-off Times for Specific Schemes**: Do special funds (e.g. international equity funds or fund-of-funds) ever deviate from the standard 15:00:00 / 13:30:00 cut-offs? (Current implementation strictly enforces BR-01 cut-offs).
 3. **Multi-Currency Schemes**: Does the AMC plan to support USD or overseas feeder funds where minimum thresholds require non-INR or higher precision? (Current implementation enforces INR 2-decimal paise precision).
+
+## BR-06: Holiday Calendar Update and Invalid-Date Handling
+
+### Confirmed Implementation Behavior
+1. **File Presence & Header Validation**:
+   - `load_holidays()` validates file existence, failing fast with `ValueError` if the specified file does not exist.
+   - Enforces the mandatory `date` header; files missing this column raise `ValueError("Holidays file missing required column: 'date'")`.
+   - Empty files immediately raise an explicit error.
+2. **Strict Date Format & Real Calendar Day Verification**:
+   - Dates must strictly follow ISO-8601 `YYYY-MM-DD` format (`holiday_date.isoformat() == date_text`).
+   - Rejects non-zero padded dates (`2026-1-5`), alternate date separators (`2026/01/26`), and Indian DD-MM-YYYY order (`26-01-2026`).
+   - Rejects non-existent or impossible calendar dates (e.g. `2026-02-30`, `2026-04-31`, `2025-02-29`) with clear row numbers.
+3. **Holiday Name / Description Enforcement**:
+   - If a `holiday_name` or legacy `description` column is present, empty or whitespace-only strings raise `ValueError`.
+4. **Duplicate Date Detection**:
+   - Ensures each calendar date appears at most once in the holiday set. Duplicate dates raise a row-numbered `ValueError(f"Holidays row {row_number}: duplicate holiday for date '{date_text}'")`.
+5. **Weekend Holiday Handling**:
+   - Holidays that fall on a weekend (Saturday or Sunday) are safely loaded into the holiday set.
+   - `is_business_day(day, holidays)` correctly checks `day.weekday() < 5 and day not in holidays`, preventing logic errors or crashes if a statutory holiday coincides with a weekend.
+6. **Consecutive Holidays & Year Boundary Traversal**:
+   - `next_business_day()` and `previous_business_day()` advance iteratively past consecutive holidays (e.g., Thursday + Friday $\implies$ Monday) and cross year boundaries seamlessly (e.g., Dec 31 / Jan 1).
+7. **Type Validation in Calendar Helpers**:
+   - `is_business_day()`, `next_business_day()`, and `previous_business_day()` validate that input arguments are `date` instances, raising `ValueError` on invalid types.
+8. **Ecosystem-Wide Calendar Integration**:
+   - **NAV Determination (EC-02)**: Orders after cut-off on a Friday before a Monday holiday resolve to Tuesday (`ORD-0013` $\implies$ `2026-01-27`).
+   - **Redemption Payout**: T+2 Equity redemptions advance across official holidays (e.g. 2026-03-03 redemption skips Holi on 2026-03-04 $\implies$ payout on 2026-03-06).
+   - **SIP Scheduling**: SIP installments due on official holidays (e.g. Id-ul-Fitr on Friday 2026-03-20) roll to the next business day (Monday 2026-03-23).
+
+### Unresolved Specification Questions (Mentor Clarifications Needed)
+1. **Exchange-Specific vs Banking Holidays**: Do Equity schemes (following NSE/BSE holidays) and Liquid/Debt schemes (following RBI/RTGS banking holidays) ever diverge (e.g. on annual bank-closing day April 1)? (Current implementation shares a unified holiday set across all asset types).
+2. **Mid-Period Holiday Additions / Cancellations**: If a sudden holiday is declared (e.g. state mourning or natural disaster) mid-cycle, should already scheduled SIP debits or settlement dates be retrospectively shifted or recomputed? (Current implementation applies the holiday calendar loaded at run initiation).
+3. **Muhurat Trading Sessions**: Does a special 1-hour evening trading session on Diwali (which normally falls on a holiday or weekend) count as an official business day for NAV cut-off and settlement? (Current implementation treats listed holiday dates strictly as non-business days).
