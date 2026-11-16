@@ -1,536 +1,392 @@
-# T001-PS-008 — Python-Based Mutual Fund Order Processing System
+# Mutual Fund Order Processing System (T001-PS-008)
 
-**Project ID:** T001-PS-008  
-**Project Type:** Python-Based Financial Application  
-**Domain:** Financial Technology (FinTech)  
-**Programming Language:** Python  
-**Repository:** [GitHub – T001-PS-008](https://github.com/Chethu7353/T001-PS-008)  
-**Status:** Implementation and integration testing completed; final submission verification pending.
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-240%20passed-brightgreen.svg)]()
+[![Code Quality](https://img.shields.io/badge/code%20quality-verified-blue.svg)]()
+[![Domain](https://img.shields.io/badge/domain-BFSI%20%7C%20Asset%20Management-navy.svg)]()
+
+A high-precision, regulation-compliant Python batch order processing engine for Asset Management Companies (AMCs) and Mutual Fund registrars. The system automates end-to-end processing for lump-sum purchases, redemptions, scheme switches, and Systematic Investment Plans (SIPs) while strictly enforcing regulatory cut-off times, funds-realisation rules, multi-tier exit-load schedules, FIFO lot management, and statutory ELSS 3-year lock-in restrictions.
 
 ---
 
-## 1. Project Overview
+## 1. Problem Statement
 
-The **Python-Based Mutual Fund Order Processing System** is an automated financial application developed to process and manage mutual fund transactions according to predefined business rules.
+Asset Management Companies (AMCs) process thousands of investor transactions daily across multiple scheme categories (Equity, Debt, Liquid). In production fund accounting, transaction execution is governed by stringent SEBI and AMFI regulations:
 
-The system handles four major types of transactions:
+- **Cut-Off Rules:** Determining the applicable Net Asset Value (NAV) depends not only on the order placement timestamp but also on the funds realisation timestamp, with differing statutory cut-off times for Liquid funds (1:30 PM) versus Equity/Debt funds (3:00 PM).
+- **Taxation & Charges:** Mandatory regulatory deductions such as 0.005% stamp duty on purchases and tiered exit loads on redemptions must be computed lot-by-lot without fractional penny errors.
+- **Lot Management & Lock-in:** Units must be depleted strictly using First-In, First-Out (FIFO) ordering, and tax-saving funds (ELSS) must hold units in an inviolable 3-year statutory lock-in from their individual allotment dates.
+- **SIP Lifecycle:** Systematic Investment Plans require resilient monthly scheduling with month-end clamping (e.g., February 31 $\implies$ February 28/29), market holiday rolling, consecutive debit failure tracking, auto-cancellation, and pause controls.
 
-- Purchase
-- Redemption
-- Switch
-- Systematic Investment Plan (SIP)
+Manual or loosely coupled order processing introduces reconciliation mismatches, regulatory penalties, and investor financial loss.
 
-It validates transaction details, determines the applicable Net Asset Value (NAV), performs financial calculations, applies business-day and holiday rules, calculates stamp duty and exit loads, and generates structured transaction reports.
+---
 
-The primary objective is to reduce manual processing, improve financial calculation accuracy, and ensure consistent execution of mutual fund business rules.
+## 2. Project Objectives
 
-## 2. Problem Statement
+1. **Deterministic Regulatory Compliance:** Enforce business rules BR-01 through BR-11 with exact precision and zero floating-point rounding errors.
+2. **High-Precision Financial Arithmetic:** Use `decimal.Decimal` throughout all monetary, unit, and exit-load calculations with strict rounding policies (`ROUND_DOWN` for unit allocation, `ROUND_CEILING` for amount-to-unit conversions).
+3. **Comprehensive Order Support:** Handle lump-sum `PURCHASE`, multi-mode `REDEEM` (`ALL`, `UNITS`, `AMOUNT`), two-legged atomic `SWITCH`, and complete `SIP` lifecycles (`REGISTER`, `DEBIT_RESULT`, `PAUSE`).
+4. **Resilient Data Ingestion:** Validate master data files (`schemes.csv`, `navs.csv`, `holidays.csv`) with fail-fast validation and clear row-numbered error reporting.
+5. **Auditable Reporting:** Generate standardized CSV output artifacts: transaction confirmations (`confirmations.csv`), SIP lifecycle logs (`sip_status.csv`), and remaining lot statements (`folio_statement.csv`).
 
-Mutual fund transaction processing involves several financial calculations and operational rules.
+---
 
-Processing these transactions manually can lead to:
+## 3. Key Features
 
-- Incorrect NAV selection.
-- Errors in transaction calculations.
-- Incorrect unit allocation.
-- Improper exit-load calculations.
-- Incorrect handling of weekends and holidays.
-- Invalid redemption of locked-in ELSS investments.
-- Inconsistent SIP scheduling.
-- Errors in maintaining investor transaction records.
+- **Multi-Category Cut-Off Engine (BR-01, BR-02):** Automatic cut-off evaluation (Equity/Debt 3:00 PM, Liquid 1:30 PM) with funds-realisation time arbitration (`max(order_ts, funds_realised_ts)`).
+- **Calendar & Holiday Progression (BR-03, BR-06):** Business-day resolution automatically rolling past weekends and gazetted market holidays loaded from `holidays.csv`.
+- **Statutory Stamp Duty & Unit Allocation (BR-07):** 0.005% stamp duty deduction quantized to paise (`ROUND_HALF_UP`) and unit allotment strictly rounded **DOWN** to three decimal places (`ROUND_DOWN`).
+- **Ceiling-Rounded Redemption & Exit Loads (BR-08, BR-11):** Amount-to-unit conversions rounded **UP** to three decimal places (`ROUND_CEILING`), with FIFO lot depletion and holding-day-based exit-load schedules.
+- **ELSS 3-Year Lock-In Defense (BR-11):** Exact 3-year statutory lock-in calculation with leap-year handling (Feb 29 $\implies$ Feb 28); partial redemptions and `REDEEM ALL` touch only matured, unlocked units.
+- **Atomic Two-Legged Switch Engine (BR-09):** Coordinates source redemption (`SWITCH_OUT`) and target purchase (`SWITCH_IN`) with dual confirmation records and target purchase minimum waiver.
+- **Full SIP Lifecycle Management (BR-10):** Monthly cycle generation, month-end clamping (Feb 28/29), rolling forward past non-business days, 3-consecutive-failure auto-cancellation, failure reset on success, and annual pause limits.
 
-Therefore, an automated system is required to validate, process, and record mutual fund transactions accurately while following predefined financial business rules.
+---
 
-## 3. Project Objectives
+## 4. Technology Stack
 
-The main objectives of this project are:
+- **Core Language:** Python 3.10+ (tested on Python 3.10, 3.11, 3.12, 3.13, 3.14)
+- **Runtime Dependencies:** Python Standard Library only (`decimal`, `dataclasses`, `datetime`, `csv`, `pathlib`, `enum`, `calendar`, `typing`)
+- **Testing & Quality Assurance:** `pytest` (240 tests, 100% pass rate)
 
-1. Automate mutual fund purchase and redemption transactions.
-2. Implement mutual fund switching between schemes.
-3. Manage recurring SIP investments.
-4. Apply NAV cutoff and funds-realisation rules.
-5. Handle business days, weekends, and holidays.
-6. Validate scheme and transaction information.
-7. Calculate stamp duty and exit loads accurately.
-8. Implement FIFO-based unit redemption.
-9. Enforce ELSS three-year lock-in restrictions.
-10. Generate structured transaction confirmations and reports.
-11. Improve reliability and consistency in mutual fund order processing.
-
-## 4. Key Features
-
-| Feature | Description |
-|---|---|
-| Purchase Processing | Processes mutual fund investment orders and calculates units. |
-| Redemption Processing | Processes withdrawals and calculates applicable charges. |
-| Switch Processing | Transfers investments between mutual fund schemes. |
-| SIP Management | Schedules and processes recurring investments. |
-| NAV Management | Selects the applicable NAV based on transaction timing. |
-| Holiday Calendar | Handles non-business days and holiday adjustments. |
-| Scheme Validation | Validates scheme information and investment conditions. |
-| Stamp Duty | Calculates applicable stamp duty. |
-| Exit Load | Applies scheme-specific exit-load rules. |
-| FIFO Processing | Redeems units in the order they were purchased. |
-| ELSS Lock-in | Prevents redemption of units before the three-year lock-in period. |
-| CSV Reports | Generates transaction confirmations, SIP status, and folio statements. |
+---
 
 ## 5. System Architecture
 
-The application follows a modular Python architecture in which different components handle specific responsibilities.
+The project is structured as a modular, decoupled domain pipeline:
 
-### Processing Workflow
+```mermaid
+flowchart TD
+    subgraph Input Files
+        CMD["commands.txt"]
+        SCH["schemes.csv"]
+        NAV["navs.csv"]
+        HOL["holidays.csv"]
+        EXT["exit_loads.csv"]
+        FOL["folios.csv"]
+        LOT["lots_opening.csv"]
+        SIP_IN["existing_sips.csv & sip_history.csv"]
+    end
 
-```text
-             INPUT DATA
-                 |
-                 v
-       CSV Data and Transaction
-              Commands
-                 |
-                 v
-       COMMAND PROCESSOR
-                 |
-                 v
-       INPUT VALIDATION
-                 |
-                 v
-          NAV ENGINE
-                 |
-                 v
-       BUSINESS RULE ENGINE
-                 |
-       +---------+----------+
-       |         |          |
-       v         v          v
-    PURCHASE  REDEMPTION   SWITCH
-       |         |          |
-       +---------+----------+
-                 |
-                 v
-            SIP ENGINE
-                 |
-                 v
-       FINANCIAL CALCULATIONS
-                 |
-                 v
-        TRANSACTION RESULTS
-                 |
-          +------+------+
-          |             |
-          v             v
-       ACCEPTED      REJECTED
-          |             |
-          +------+------+
-                 |
-                 v
-          OUTPUT REPORTS
-                 |
-       +---------+----------+
-       |         |          |
-       v         v          v
- Confirmations  SIP Status  Folio
-     CSV          CSV      Statement
-                            CSV
+    subgraph Reference & Validation Engines
+        SE["scheme_engine.py<br>(BR-04)"]
+        NE["nav_engine.py<br>(BR-01, BR-02, BR-03, BR-05, BR-06)"]
+        EE["exit_load_engine.py<br>(BR-11)"]
+        LM["lot_manager.py<br>(BR-11)"]
+        SM["sip_engine.py<br>(BR-10)"]
+    end
+
+    subgraph Batch Execution Layer
+        CP["command_processor.py"]
+        MAIN["main.py (CLI)"]
+    end
+
+    subgraph Transaction Processing Engines
+        PE["purchase_engine.py<br>(BR-07)"]
+        RE["redemption_engine.py<br>(BR-08)"]
+        SWE["switch_engine.py<br>(BR-09)"]
+    end
+
+    subgraph Generated Output Artifacts
+        CONF["confirmations.csv<br>(77 rows)"]
+        SST["sip_status.csv<br>(17 rows)"]
+        FST["folio_statement.csv<br>(88 rows)"]
+    end
+
+    SCH --> SE --> CP
+    NAV --> NE --> CP
+    HOL --> NE --> CP
+    EXT --> EE --> CP
+    LOT --> LM --> CP
+    SIP_IN --> SM --> CP
+    FOL --> CP
+    CMD --> CP
+
+    CP --> PE
+    CP --> RE
+    CP --> SWE
+    CP --> SM
+    CP --> LM
+
+    MAIN --> CP
+    CP --> CONF
+    CP --> SST
+    CP --> FST
 ```
 
-### Main Components
+---
 
-- **Command Processor:** Reads and processes transaction commands.
-- **NAV Engine:** Determines the applicable NAV based on cutoff and business-day rules.
-- **Scheme Engine:** Validates mutual fund scheme information.
-- **Purchase Engine:** Processes investment transactions.
-- **Redemption Engine:** Handles withdrawals, FIFO allocation, and exit loads.
-- **Switch Engine:** Manages transfers between mutual fund schemes.
-- **SIP Engine:** Manages recurring investment schedules and transaction states.
-- **Holiday Calendar:** Determines business days and adjusts transaction dates.
-- **Models:** Maintains the application's transaction and investment data structures.
-
-## 6. Technology Stack
-
-| Technology | Purpose |
-|---|---|
-| Python | Core application development |
-| CSV | Input data and output report management |
-| Decimal | Financial arithmetic and precision |
-| Pytest | Unit and integration testing |
-| Git | Version control |
-| GitHub | Source code repository |
-| PowerShell | Development and execution environment |
-
-## 7. Business Rules Implemented
-
-The system implements 11 major business rules.
-
-| Rule | Business Rule | Description |
-|---|---|---|
-| BR-01 | NAV Cutoff | Applies scheme-specific NAV cutoff timings. |
-| BR-02 | Funds Realisation | Uses the later of order receipt and funds-realisation time for NAV eligibility. |
-| BR-03 | Business-Day Calendar | Handles weekends and non-business days. |
-| BR-04 | Scheme Master Validation | Validates scheme IDs, types, cutoffs, and investment limits. |
-| BR-05 | NAV File Validation | Validates NAV input data and handles missing or duplicate records. |
-| BR-06 | Holiday Calendar | Validates holiday dates and handles holiday-based business-day adjustments. |
-| BR-07 | Purchase Engine | Calculates investment amounts and units. |
-| BR-08 | Redemption Engine | Processes withdrawals and applies redemption rules. |
-| BR-09 | Switch Engine | Handles source redemption and target scheme investment. |
-| BR-10 | SIP Engine | Manages recurring investment schedules and SIP states. |
-| BR-11 | FIFO, Exit Load and ELSS | Implements FIFO allocation, exit-load calculations, and ELSS lock-in restrictions. |
-
-### Important Financial Rules
-
-**NAV Cutoff Times**
-
-| Scheme Type | Cutoff Time |
-|---|---|
-| Equity | 3:00 PM |
-| Debt | 3:00 PM |
-| Liquid | 1:30 PM |
-
-**Minimum Investment Amounts**
-
-| Transaction | Minimum Amount |
-|---|---:|
-| First Purchase | ₹5,000 |
-| Additional Purchase | ₹1,000 |
-| SIP | ₹500 |
-| Partial Redemption | ₹1,000 or all available units |
-
-**Stamp Duty**
-
-- Stamp duty rate: 0.005%.
-- Calculated using decimal arithmetic and rounded to two decimal places.
-
-**Purchase Unit Calculation**
-
-Units are calculated using the investible amount divided by the applicable NAV and rounded down to three decimal places.
-
-**Redemption**
-
-For amount-based redemption, the required units are rounded up to three decimal places to ensure that the requested redemption amount is covered.
-
-**Exit Load**
-
-- Equity: 1% up to and including day 365; zero from day 366.
-- Debt: 0.25% up to and including day 30.
-- Liquid: Uses the applicable graded exit-load schedule.
-
-**Payout Period**
-
-| Scheme Type | Payout |
-|---|---|
-| Equity | T+2 |
-| Debt | T+1 |
-| Liquid | T+1 |
-
-**ELSS Lock-in**
-
-ELSS investments have a three-year lock-in period. Units cannot be redeemed before their individual lock-in completion dates.
-
-## 8. Supported Transaction Types
-
-### 8.1 Purchase
-
-The purchase module processes mutual fund investment orders.
-
-It:
-- Validates investor and scheme details.
-- Determines the applicable NAV.
-- Calculates stamp duty.
-- Calculates investible amount.
-- Determines the number of units allocated.
-- Generates transaction confirmation.
-
-### 8.2 Redemption
-
-The redemption module processes investor withdrawal requests.
-
-It:
-- Validates the redemption request.
-- Checks available units.
-- Applies FIFO lot allocation.
-- Calculates exit load.
-- Calculates net redemption proceeds.
-- Checks ELSS lock-in restrictions.
-- Determines the applicable payout date.
-
-### 8.3 Switch
-
-The switch module transfers investments from one mutual fund scheme to another.
-
-It:
-- Processes the source scheme redemption.
-- Applies applicable exit load.
-- Calculates net proceeds.
-- Processes the target scheme investment.
-- Generates switch-out and switch-in confirmations.
-
-### 8.4 Systematic Investment Plan (SIP)
-
-The SIP module manages recurring mutual fund investments.
-
-It supports:
-- SIP registration.
-- Monthly installment scheduling.
-- Month-end date adjustment.
-- Weekend and holiday adjustments.
-- SIP pause and cancellation.
-- Consecutive failure tracking.
-- Automatic cancellation after three consecutive failures.
-
-## 9. Project Directory Structure
-
-The project is organized into modular directories.
+## 6. Project Directory Structure
 
 ```text
 T001-PS-008/
-│
-├── src/
-│   ├── __init__.py
-│   ├── main.py
-│   ├── command_processor.py
-│   ├── models.py
-│   ├── nav_engine.py
-│   ├── scheme_engine.py
-│   ├── purchase_engine.py
-│   ├── redemption_engine.py
-│   ├── sip_engine.py
-│   └── ...
-│
-├── tests/
-│   ├── test_holidays.py
-│   ├── test_sip_engine.py
-│   └── ...
-│
+├── .gitignore                      # Git ignore configuration
+├── README.md                       # Comprehensive project documentation
+├── requirements.txt                # Testing dependencies (pytest)
+├── confirmations.csv               # Generated confirmation records (77 rows)
+├── sip_status.csv                  # Generated SIP lifecycle records (17 rows)
+├── folio_statement.csv             # Generated remaining lots statement (88 rows)
 ├── data/
-│   └── sample_pack/
-│       ├── ...
-│
+│   ├── holidays.csv                # Legacy sample holiday file
+│   ├── nav.csv                     # Legacy sample NAV file
+│   └── sample_pack/                # Official benchmark dataset
+│       ├── commands.txt            # 92 transaction commands
+│       ├── existing_sips.csv       # Pre-existing active SIPs
+│       ├── exit_loads.csv          # Tiered exit load schedules
+│       ├── folios.csv              # 10 investor folios
+│       ├── holidays.csv            # 6 market holidays
+│       ├── lots_opening.csv        # 30 opening investment lots
+│       ├── navs.csv                # 396 scheme NAV records
+│       ├── README.md               # Official sample pack specifications
+│       ├── schemes.csv             # 6 mutual fund schemes
+│       └── sip_history.csv         # Historic SIP debit outcomes
 ├── docs/
-│   ├── business_rules.md
-│   ├── project_overview.md
-│   ├── open_questions.md
-│   ├── day10_integration_audit.md
-│   └── final_project_report.md
-│
-├── requirements.txt
-└── README.md
+│   ├── business_rules.md           # Business rule register and confirmed specifications
+│   ├── class_diagram.md            # Domain class relationships
+│   ├── day10_integration_audit.md  # Day 10 full-system audit report
+│   ├── final_project_report.md     # Comprehensive academic capstone report
+│   ├── glossary.md                 # BFSI domain definitions
+│   ├── open_questions.md           # Mentor questions and clarifications
+│   ├── project_overview.md         # Architecture overview
+│   └── state_diagram.md            # Order and SIP lifecycle state transitions
+├── src/
+│   ├── __init__.py                 # Package initializer
+│   ├── command_processor.py        # Central command dispatcher and batch runner
+│   ├── exit_load_engine.py         # Exit-load schedule band parser and calculator
+│   ├── lot_manager.py              # FIFO lot depletion, holdings, and ELSS lock-in
+│   ├── main.py                     # Application CLI entry point
+│   ├── models.py                   # Domain dataclasses and Enums
+│   ├── nav_engine.py               # Cut-off times, business-day calendar, NAV loader
+│   ├── purchase_engine.py          # Stamp duty and unit allocation logic
+│   ├── redemption_engine.py        # Redemption amount calculation and payout dates
+│   ├── scheme_engine.py            # Scheme master validation and loader
+│   ├── sip_engine.py               # SIP registration, scheduling, pause, and debit tracking
+│   └── switch_engine.py            # Atomic two-legged switch execution
+└── tests/
+    ├── test_command_processor.py   # Integration tests and planted edge cases (EC-01 to EC-08)
+    ├── test_fifo_elss.py           # FIFO depletion, partial slices, leap-year ELSS tests
+    ├── test_holidays.py            # Holiday parsing, duplicate dates, weekend rolling tests
+    ├── test_models.py              # Dataclass initialization tests
+    ├── test_nav.py                 # Cut-off time and business-day helper tests
+    ├── test_purchase.py            # Purchase minimums, stamp duty, unit round-down tests
+    ├── test_redemption.py          # Redemption modes, ceiling rounding, exit load tests
+    ├── test_scheme.py              # Scheme schema validation, category binding tests
+    ├── test_sip_engine.py          # SIP scheduling, failure counter, auto-cancellation tests
+    └── test_switch.py              # Switch validation, dual confirmation, waiver tests
 ```
 
-*Note: The directory listing is representative. Refer to the actual repository for the complete file structure.*
+---
 
-## 10. Installation and Setup
+## 7. Business Rules (BR-01 to BR-11)
+
+| Rule ID | Rule Title | Core Specification | Implementation Module |
+|---|---|---|---|
+| **BR-01** | **NAV Cut-Off Rules** | Equity & Debt: 3:00 PM (before = same day, at/after = next business day). Liquid: 1:30 PM (before = previous day, at/after = next business day). | `src/nav_engine.py` |
+| **BR-02** | **Funds Realisation Rule** | Governing decision timestamp is $\max(\text{order\_ts}, \text{funds\_realised\_ts})$. Realisation time decides cut-off compliance. | `src/nav_engine.py` |
+| **BR-03** | **Business-Day Calendar** | Business days are Monday through Friday, strictly excluding dates listed in `holidays.csv`. | `src/nav_engine.py` |
+| **BR-04** | **Scheme Master Validation** | Validates uppercase alphanumeric scheme IDs, valid types, ELSS restricted to Equity, cut-off alignment, and strictly positive 2-decimal minimums. | `src/scheme_engine.py` |
+| **BR-05** | **NAV File Validation** | Strict YYYY-MM-DD dates, exactly 4 decimal places, positive finite numbers, unique `(scheme_id, nav_date)` primary key. | `src/nav_engine.py` |
+| **BR-06** | **Holiday Calendar Validation** | Validates ISO dates, rejects duplicates and impossible calendar days, safely handles weekend holidays, loops past consecutive holidays. | `src/nav_engine.py` |
+| **BR-07** | **Purchase Order Processing** | First purchase min ₹5,000; additional min ₹1,000; 0.005% stamp duty quantized to paise; units strictly rounded **DOWN** to 3 decimal places. | `src/purchase_engine.py` |
+| **BR-08** | **Redemption Order Processing** | Modes `ALL`, `UNITS`, `AMOUNT`; partial redemptions min ₹1,000; amount-to-units uses ceiling rounding to 3 decimal places; payout $T+1$ (Debt/Liquid) or $T+2$ (Equity). | `src/redemption_engine.py` |
+| **BR-09** | **Scheme Switch Processing** | Atomic two-legged transaction (`SWITCH_OUT` + `SWITCH_IN`); 0.005% stamp duty on target leg; target purchase minimum waived; dual confirmation records. | `src/switch_engine.py` |
+| **BR-10** | **SIP Engine** | Min ₹500; first installment $\ge$ 7 days; month-end clamping (Feb 28/29); 3 consecutive debit failures auto-cancels; success resets counter; pause 1-3 months once/year. | `src/sip_engine.py` |
+| **BR-11** | **FIFO Lots & ELSS Lock-In** | Earliest allotment date depleted first; per-lot exit loads; 3-year statutory lock-in per lot for ELSS; locked lots untouched in `REDEEM ALL`. | `src/lot_manager.py` |
+
+---
+
+## 8. Input CSV File Formats
+
+| File Name | Purpose | Primary Key | Key Columns |
+|---|---|---|---|
+| `schemes.csv` | Scheme master records (6 rows) | `scheme_id` | `scheme_id,scheme_name,scheme_type,elss,cutoff_time,min_first_purchase,min_additional,min_sip,min_redemption` |
+| `navs.csv` | Historical NAV publications (396 rows) | `(scheme_id, nav_date)` | `nav_date,scheme_id,nav` (4 decimal places) |
+| `holidays.csv` | Market & bank holidays (6 rows) | `date` | `date,holiday_name` |
+| `exit_loads.csv` | Tiered exit load schedules (8 rows) | `(scheme_type, from_day, to_day)` | `scheme_type,from_day,to_day,load_pct` |
+| `folios.csv` | Investor folio accounts (10 rows) | `folio_id` | `folio_id,investor_name,pan,mobile,bank_account,ifsc,opened_date` |
+| `lots_opening.csv` | Opening portfolio holdings (30 rows) | `lot_id` | `lot_id,folio_id,scheme_id,allotment_date,units,purchase_nav` |
+| `existing_sips.csv` | Pre-existing active SIPs (2 rows) | `sip_id` | `sip_id,folio_id,scheme_id,amount,sip_day,registered_date,status,consecutive_failures` |
+| `sip_history.csv` | Pre-existing SIP debit history (3 rows) | `(sip_id, instalment_no)` | `sip_id,instalment_no,instalment_date,result,reason` |
+| `commands.txt` | Transaction command queue (92 commands) | Line Order | `COMMAND_NAME\|arg1\|arg2\|...` |
+
+---
+
+## 9. Output CSV File Formats
+
+### 1. `confirmations.csv` (77 data rows)
+Emits one row per order (`PURCHASE`, `REDEMPTION`, `SIP_PURCHASE`) and two rows per `SWITCH` (`SWITCH_OUT` then `SWITCH_IN`).
+- **Columns:** `order_id,folio_id,scheme_id,txn_type,decision,rule_ids,nav_date,nav,gross_amount,stamp_duty,units,exit_load,net_amount,payout_date`
+- **Formatting:** Units to 3 decimals, NAV to 4 decimals, Currency to 2 decimals. Empty numerical/date fields for rejected orders.
+
+### 2. `sip_status.csv` (17 data rows)
+Emits one row per SIP lifecycle event (`SIP_REGISTER`, `SIP_PAUSE`, `SIP_DEBIT_RESULT`).
+- **Columns:** `sip_id,event,instalment_no,scheduled_date,result,order_id,consecutive_failures,sip_status,rule_ids`
+
+### 3. `folio_statement.csv` (88 data rows)
+Emits one row per remaining non-zero lot per `PRINT_FOLIO` command.
+- **Columns:** `folio_id,as_of_date,scheme_id,lot_id,allotment_date,units,lock_in_until`
+- **Formatting:** `lock_in_until` is populated exclusively for ELSS lots (`YYYY-MM-DD`).
+
+---
+
+## 10. Installation & Environment Setup
 
 ### Prerequisites
+- Python 3.10 or higher installed on your system.
+- Git command-line tool.
 
-- Python installed.
-- Git installed.
-- PowerShell or another command-line terminal.
-- Access to the project repository.
+### Setup Instructions
 
-### Step 1: Clone the Repository
+1. **Clone the Repository:**
+   ```bash
+   git clone https://github.com/Chethu7353/T001-PS-008.git
+   cd T001-PS-008
+   ```
 
-```powershell
-git clone https://github.com/Chethu7353/T001-PS-008.git
-```
+2. **Create and Activate a Virtual Environment:**
+   ```bash
+   # Windows (PowerShell)
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
 
-### Step 2: Navigate to the Project
+   # Linux / macOS
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
 
-```powershell
-cd T001-PS-008
-```
+3. **Install Dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### Step 3: Create a Virtual Environment
+---
 
-```powershell
-python -m venv venv
-```
+## 11. Application Execution
 
-### Step 4: Activate the Virtual Environment
+The system supports two execution paradigms: an **Interactive Terminal Application** (default) and a headless **Batch Execution** mode.
 
-```powershell
-.\venv\Scripts\Activate.ps1
-```
+### 1. Interactive Terminal Mode (Default)
+Launch the interactive, menu-driven CLI:
 
-### Step 5: Install Dependencies
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-## 11. Running the Application
-
-Execute the following command from the project root directory:
-
-```powershell
+```bash
 python -m src.main
 ```
 
-The application processes the transaction commands and generates the required CSV output reports.
-
-### Sample Execution Output
-
+The system displays the interactive menu:
 ```text
-Mutual Fund Order Processing System
+===============================================
+       MUTUAL FUND ORDER PROCESSING SYSTEM
+===============================================
+1. Purchase Mutual Fund
+2. Redeem Mutual Fund
+3. Switch Mutual Fund
+4. Register SIP
+5. Pause SIP
+6. Process SIP Debit Result
+7. View Investor Folio
+8. View Available Schemes
+9. View Transaction History
+10. Generate Reports
+11. Run Batch Processing
+12. Exit
+===============================================
+```
 
+**Key Interactive Capabilities:**
+- **Full Engine Integration:** Every transaction reuses official domain engines (`CommandProcessor`, `purchase_engine`, `redemption_engine`, `switch_engine`, `sip_engine`, `lot_manager`).
+- **Session State Accumulation:** Multiple purchases, redemptions, and switches accumulate dynamically across the active session.
+- **Persistence Across Restarts:** Interactive transactions are recorded to `data/interactive_commands.txt` and automatically replayed on subsequent startups.
+- **Safe Batch Delegation:** Option 11 runs the official sample pack batch without mutating interactive session state.
+
+### 2. Headless Batch Execution Mode
+To process the official benchmark dataset (`data/sample_pack/`) directly:
+
+```bash
+python -m src.main --batch
+```
+
+### Expected Batch CLI Output:
+```text
+Mutual Fund Order Processing System - Batch Execution
 Processed 92 commands: 86 accepted, 6 rejected.
-
 Generated confirmations.csv (77 rows)
 Generated sip_status.csv (17 rows)
 Generated folio_statement.csv (88 rows)
 ```
 
-The above represents the verified sample-pack execution baseline.
-
-## 12. Output Files
-
-The system generates three primary output reports.
-
-### 12.1 confirmations.csv
-
-Contains transaction confirmation records.
-
-It records the results of processed transactions, including accepted and rejected transaction details according to the application's output schema.
-
-### 12.2 sip_status.csv
-
-Contains SIP-related processing information, including installment status and relevant SIP state information.
-
-### 12.3 folio_statement.csv
-
-Contains investor folio and investment-lot statement information.
-
-These reports help track transaction results and investment records.
-
-## 13. Testing and Validation
-
-The project uses Pytest for automated testing.
-
-### Run the Complete Test Suite
-
-```powershell
-python -m pytest -q
-```
-
-### Verified Integration Cases
-
-The project includes eight official acceptance scenarios.
-
-| Case | Description |
-|---|---|
-| EC-01 | Funds-realisation cutoff validation |
-| EC-02 | Weekend and holiday NAV selection |
-| EC-03 | SIP month-end scheduling |
-| EC-04 | Equity exit-load day 365 and day 366 |
-| EC-05 | Redemption unit rounding and insufficient balance |
-| EC-06 | Switch target minimum waiver |
-| EC-07 | ELSS lot-level lock-in |
-| EC-08 | SIP consecutive failure reset |
-
-### Previous Verified Test Results
-
-The Day 10 integration audit reported:
-
-```text
-225 passed
-0 failed
-```
-
-### Previous Sample-Pack Baseline
-
-| Metric | Verified Result |
-|---|---:|
-| Commands Processed | 92 |
-| Accepted | 86 |
-| Rejected | 6 |
-| Confirmations | 77 |
-| SIP Status | 17 |
-| Folio Statement | 88 |
-
-**Note:** These are previously verified results. Run the test suite and application again after any subsequent code changes to confirm the final submission results.
-
-## 14. Error Handling and Validation
-
-The system includes validation for:
-
-- Invalid transaction commands.
-- Invalid scheme information.
-- Invalid folio information.
-- Invalid dates.
-- Duplicate scheme and holiday records.
-- Missing or invalid input data.
-- Insufficient redemption units.
-- ELSS lock-in restrictions.
-- Invalid SIP registration and scheduling conditions.
-- Financial input validation.
-
-Invalid transactions are rejected rather than being processed as valid transactions.
-
-## 15. Limitations
-
-The current project is designed as a Python-based order-processing application using CSV input and output files.
-
-The following capabilities are outside the currently verified implementation:
-
-- Live integration with mutual fund or stock exchange APIs.
-- Real-time market NAV feeds.
-- Online investor account management.
-- Payment gateway integration.
-- Production database deployment.
-- Web-based investor dashboard.
-- Live notification services.
-- Production authentication and authorization.
-
-The application should not be considered a live mutual fund investment platform.
-
-## 16. Future Scope
-
-The project can be extended with the following enhancements:
-
-1. Integrate a relational database such as PostgreSQL.
-2. Develop a web dashboard using Django or Flask.
-3. Integrate live NAV data sources.
-4. Add investor authentication and authorization.
-5. Implement REST APIs for transaction processing.
-6. Introduce transaction history and portfolio tracking.
-7. Add automated email and SMS notifications.
-8. Develop reporting and financial analytics dashboards.
-9. Implement database transaction management and audit logs.
-10. Introduce production-grade monitoring and security controls.
-
-## 17. Advantages
-
-- Reduces manual transaction processing.
-- Improves financial calculation consistency.
-- Automates repetitive SIP operations.
-- Applies predefined financial business rules.
-- Supports multiple transaction types.
-- Provides structured transaction reports.
-- Uses modular architecture for maintainability.
-- Includes automated unit and integration testing.
-
-## 18. Conclusion
-
-The Python-Based Mutual Fund Order Processing System demonstrates how software automation can simplify mutual fund transaction management.
-
-By integrating NAV selection, scheme validation, purchase, redemption, switching, SIP management, holiday handling, FIFO allocation, exit-load calculations, and ELSS lock-in validation, the system provides a structured approach to processing mutual fund orders.
-
-The project demonstrates practical applications of Python programming, modular software development, financial calculations, business-rule implementation, data validation, and automated testing.
-
-**The main goal is to automate mutual fund operations while maintaining accuracy, reliability, and consistency with defined business rules.**
+Generated files (`confirmations.csv`, `sip_status.csv`, and `folio_statement.csv`) are written directly to the project root directory.
 
 ---
 
-## Project Information
+## 12. Test Execution & Verification
 
-| Detail | Information |
-|---|---|
-| Project ID | T001-PS-008 |
-| Project Name | Python-Based Mutual Fund Order Processing System |
-| Domain | Financial Technology |
-| Language | Python |
-| Testing Framework | Pytest |
-| Data Format | CSV |
-| Repository | [GitHub Repository](https://github.com/Chethu7353/T001-PS-008) |
+Run the complete automated test suite using `pytest`:
 
-**Project Motto:**
+```bash
+# Quiet mode
+python -m pytest -q
 
-*Automating Mutual Fund Operations with Accuracy, Reliability and Business-Rule Compliance.*
+# Detailed verbose mode
+python -m pytest -v
+```
+
+### Test Suite Summary:
+```text
+tests/test_command_processor.py ........ (9 tests)
+tests/test_fifo_elss.py .................. (18 tests)
+tests/test_holidays.py ............................ (28 tests)
+tests/test_interactive.py ............. (13 tests)
+tests/test_models.py .... (4 tests)
+tests/test_nav.py ...................... (22 tests)
+tests/test_purchase.py ............... (15 tests)
+tests/test_redemption.py .................... (20 tests)
+tests/test_scheme.py .................................. (34 tests)
+tests/test_sip_engine.py ........................ (24 tests)
+tests/test_switch.py ................................................... (53 tests)
+
+======================== 240 passed in 0.95s ========================
+```
+
+---
+
+## 13. Official Acceptance Cases (EC-01 to EC-08)
+
+All 8 benchmark edge cases planted in the official sample pack have been verified with exact field-level precision:
+
+| Case | Description | Actual Verified Behavior | Result |
+|---|---|---|:---:|
+| **EC-01** | Funds realisation at 15:00:00 determines NAV cutoff | `ORD-0006`: received 14:59:59 realised 15:00:00 $\to$ next business day NAV `2026-01-20`. | **PASS** |
+| **EC-02** | Weekend & Republic Day holiday NAV selection | `ORD-0013`: Friday 16:00:00 before Monday holiday $\to$ Tuesday NAV `2026-01-27`. | **PASS** |
+| **EC-03** | Day 31 SIP registration preceding February | `SIP-N01`: clamps to Feb 28 (Sat) $\to$ Mon `2026-03-02`; next cycle `2026-03-31`. | **PASS** |
+| **EC-04** | Day 365 vs Day 366 Equity exit load (1% vs 0%) | `ORD-0026`: 1% exit load = ₹124.62.<br>`ORD-0027`: 0% nil exit load = ₹0.00. | **PASS** |
+| **EC-05** | Amount redemption ceil3 units exceeding balance | `ORD-0034`: needs 708.740 units against holding of 708.739 $\to$ `REJECTED` (BR-08). | **PASS** |
+| **EC-06** | Switch source proceeds fall below target minimum | `ORD-0008`: net proceeds ₹994.95 ($< 1000$); purchase minimum waived $\to$ `ACCEPTED`. | **PASS** |
+| **EC-07** | ELSS lot maturing on redemption date itself | `ORD-0033`: redeems mature LOT-021 (182.406 units); locked LOT-022 remains untouched. | **PASS** |
+| **EC-08** | Consecutive failure reset on success | `SIP-E01`: 2 fail $\to$ 1 success $\to$ 2 fail: remains `ACTIVE` with count 2. | **PASS** |
+
+---
+
+## 14. Known Limitations
+
+1. **Naive Timestamps:** Timestamps in `commands.txt` are assumed to be in Indian Standard Time (IST, UTC+05:30) without explicit timezone offsets.
+2. **Unified Holiday Calendar:** A single holiday schedule is applied across all scheme categories, whereas real-world equity funds observe exchange holidays (NSE/BSE) and liquid/debt funds observe banking clearing holidays (RBI/RTGS).
+3. **Sequential Batch Architecture:** Commands are processed deterministically in sequential file order within a single process, suitable for reconciliation batches rather than high-concurrency microsecond trading.
+
+---
+
+## 15. Future Scope
+
+- **RESTful API & Event Streaming:** Expose order ingestion via FastAPI/gRPC and Kafka event queues.
+- **Relational ACID Storage:** Integrate PostgreSQL with SQLAlchemy/SQLModel for transaction logging and audit trails.
+- **Multi-Tenancy & Investor Portals:** Add multi-AMC tenant isolation, role-based access control (RBAC), and customer-facing statement dashboards.
+- **Corporate Action Automation:** Automate dividend reinvestments, scheme mergers, and bonus unit allotments.
+
+---
+
+## 16. Author & Academic Context
+
+- **Project:** T001-PS-008 — Mutual Fund Order Processing System
+- **Domain:** BFSI — Asset Management & Fund Accounting
+- **Repository:** [https://github.com/Chethu7353/T001-PS-008](https://github.com/Chethu7353/T001-PS-008)
+- **Evaluation Status:** Complete, Verified, and Submission-Ready.

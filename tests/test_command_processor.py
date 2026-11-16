@@ -202,3 +202,63 @@ def test_planted_edge_cases_in_dataset():
     ord_0033 = next(c for c in proc.confirmations if c["order_id"] == "ORD-0033")
     assert ord_0033["decision"] == "ACCEPTED"
     assert ord_0033["units"] == "182.406"  # Only LOT-021, not LOT-022
+
+
+def test_purchase_unknown_scheme_or_folio_rejected(processor):
+    """ISS-01: Verify PURCHASE rejects unknown scheme/folio or invalid amount safely without KeyError."""
+    initial_rejected = processor.commands_rejected
+
+    # 1. Unknown scheme ID
+    processor.process_line(
+        "PURCHASE|ORD-UNK-SCH|2026-01-06 10:00:00|FOL-001|SCH-NONEXISTENT|5000.00|2026-01-06 10:00:00"
+    )
+    assert processor.confirmations[-1]["order_id"] == "ORD-UNK-SCH"
+    assert processor.confirmations[-1]["decision"] == "REJECTED"
+    assert processor.confirmations[-1]["rule_ids"] == "BR-07"
+
+    # 2. Unknown folio ID
+    processor.process_line(
+        "PURCHASE|ORD-UNK-FOL|2026-01-06 10:00:00|FOL-NONEXISTENT|SCH-01|5000.00|2026-01-06 10:00:00"
+    )
+    assert processor.confirmations[-1]["order_id"] == "ORD-UNK-FOL"
+    assert processor.confirmations[-1]["decision"] == "REJECTED"
+    assert processor.confirmations[-1]["rule_ids"] == "BR-07"
+
+    # 3. Invalid non-numeric/non-finite amount
+    processor.process_line(
+        "PURCHASE|ORD-UNK-AMT|2026-01-06 10:00:00|FOL-001|SCH-01|NaN|2026-01-06 10:00:00"
+    )
+    assert processor.confirmations[-1]["order_id"] == "ORD-UNK-AMT"
+    assert processor.confirmations[-1]["decision"] == "REJECTED"
+
+    assert processor.commands_rejected == initial_rejected + 3
+
+def test_redeem_unknown_scheme_or_folio_rejected(processor):
+    """ISS-01: Verify REDEEM rejects unknown scheme/folio or invalid timestamp safely without KeyError."""
+    initial_rejected = processor.commands_rejected
+
+    # 1. Unknown scheme ID
+    processor.process_line(
+        "REDEEM|ORD-UNK-RED-SCH|2026-01-06 10:00:00|FOL-001|SCH-NONEXISTENT|ALL|"
+    )
+    assert processor.confirmations[-1]["order_id"] == "ORD-UNK-RED-SCH"
+    assert processor.confirmations[-1]["decision"] == "REJECTED"
+    assert processor.confirmations[-1]["rule_ids"] == "BR-08"
+
+    # 2. Unknown folio ID
+    processor.process_line(
+        "REDEEM|ORD-UNK-RED-FOL|2026-01-06 10:00:00|FOL-NONEXISTENT|SCH-01|ALL|"
+    )
+    assert processor.confirmations[-1]["order_id"] == "ORD-UNK-RED-FOL"
+    assert processor.confirmations[-1]["decision"] == "REJECTED"
+    assert processor.confirmations[-1]["rule_ids"] == "BR-08"
+
+    # 3. Invalid timestamp
+    processor.process_line(
+        "REDEEM|ORD-UNK-RED-TS|invalid-timestamp|FOL-001|SCH-01|ALL|"
+    )
+    assert processor.confirmations[-1]["order_id"] == "ORD-UNK-RED-TS"
+    assert processor.confirmations[-1]["decision"] == "REJECTED"
+    assert processor.confirmations[-1]["rule_ids"] == "BR-08"
+
+    assert processor.commands_rejected == initial_rejected + 3

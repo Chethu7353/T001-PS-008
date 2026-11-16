@@ -120,9 +120,52 @@ class CommandProcessor:
     ) -> None:
         """Process a lump-sum PURCHASE command."""
         self.commands_processed += 1
-        order_ts = datetime.fromisoformat(order_ts_str)
-        realised_ts = datetime.fromisoformat(realised_ts_str)
-        amount = Decimal(amount_str)
+
+        if folio_id not in self.folios or scheme_id not in self.schemes:
+            self.commands_rejected += 1
+            self.confirmations.append({
+                "order_id": order_id,
+                "folio_id": folio_id,
+                "scheme_id": scheme_id,
+                "txn_type": "PURCHASE",
+                "decision": "REJECTED",
+                "rule_ids": "BR-07",
+                "nav_date": "",
+                "nav": "",
+                "gross_amount": "",
+                "stamp_duty": "",
+                "units": "",
+                "exit_load": "",
+                "net_amount": "",
+                "payout_date": "",
+            })
+            return
+
+        try:
+            order_ts = datetime.fromisoformat(order_ts_str)
+            realised_ts = datetime.fromisoformat(realised_ts_str)
+            amount = Decimal(amount_str)
+            if not amount.is_finite() or amount <= Decimal("0"):
+                raise ValueError("Invalid purchase amount")
+        except Exception:
+            self.commands_rejected += 1
+            self.confirmations.append({
+                "order_id": order_id,
+                "folio_id": folio_id,
+                "scheme_id": scheme_id,
+                "txn_type": "PURCHASE",
+                "decision": "REJECTED",
+                "rule_ids": "BR-07",
+                "nav_date": "",
+                "nav": "",
+                "gross_amount": "",
+                "stamp_duty": "",
+                "units": "",
+                "exit_load": "",
+                "net_amount": "",
+                "payout_date": "",
+            })
+            return
 
         scheme = self.schemes[scheme_id]
         is_first = not self.lot_manager.has_holding(folio_id, scheme_id)
@@ -206,7 +249,49 @@ class CommandProcessor:
     ) -> None:
         """Process a REDEEM command."""
         self.commands_processed += 1
-        order_ts = datetime.fromisoformat(order_ts_str)
+
+        if folio_id not in self.folios or scheme_id not in self.schemes:
+            self.commands_rejected += 1
+            self.confirmations.append({
+                "order_id": order_id,
+                "folio_id": folio_id,
+                "scheme_id": scheme_id,
+                "txn_type": "REDEMPTION",
+                "decision": "REJECTED",
+                "rule_ids": "BR-08",
+                "nav_date": "",
+                "nav": "",
+                "gross_amount": "",
+                "stamp_duty": "",
+                "units": "",
+                "exit_load": "",
+                "net_amount": "",
+                "payout_date": "",
+            })
+            return
+
+        try:
+            order_ts = datetime.fromisoformat(order_ts_str)
+        except Exception:
+            self.commands_rejected += 1
+            self.confirmations.append({
+                "order_id": order_id,
+                "folio_id": folio_id,
+                "scheme_id": scheme_id,
+                "txn_type": "REDEMPTION",
+                "decision": "REJECTED",
+                "rule_ids": "BR-08",
+                "nav_date": "",
+                "nav": "",
+                "gross_amount": "",
+                "stamp_duty": "",
+                "units": "",
+                "exit_load": "",
+                "net_amount": "",
+                "payout_date": "",
+            })
+            return
+
         scheme = self.schemes[scheme_id]
         nav_date = get_applicable_nav_date(
             scheme.scheme_type,
