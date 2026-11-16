@@ -4,7 +4,7 @@
 **Language:** Python 3.10+  
 **Type:** Command-line application and batch processing system
 
-## 1. Project Overview
+## 1. Problem statement
 
 The Mutual Fund Order Processing System processes investor transactions for mutual fund schemes. It supports purchases, redemptions, scheme switches and Systematic Investment Plans (SIPs).
 
@@ -112,48 +112,3 @@ T001-PS-008/
 └── README.md
 ```
 
-## 8. Setup
-
-Clone the repository:
-
-```bash
-git clone https://github.com/Chethu7353/T001-PS-008.git
-cd T001-PS-008
-```
-
-Create and activate a virtual environment (Windows PowerShell):
-
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-```
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-## 9. Run the Application
-
-Interactive mode:
-
-```bash
-python -m src.main
-```
-
-Batch mode:
-
-```bash
-python -m src.main --batch
-```
-
-## 10. Run Tests
-
-```bash
-python -m pytest -q
-```
-
-## 11. Detailed Design
-
-See docs/design.md for the project purpose, inputs, processing, outputs and high-level design.
