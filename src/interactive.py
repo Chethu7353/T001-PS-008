@@ -7,11 +7,26 @@ a menu-driven, multi-transaction terminal experience with persistence.
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+import re
 import sys
 from typing import TextIO
 
 from src.command_processor import CommandProcessor
 from src.lot_manager import get_elss_lock_in_date
+
+
+def _normalize_id(val: str, prefix: str, width: int, valid_keys: dict) -> str:
+    """Normalize input identifier (e.g. SCH-001 -> SCH-01, FOL-01 -> FOL-001)."""
+    cleaned = val.strip().upper()
+    if cleaned in valid_keys:
+        return cleaned
+    pattern = rf"^{prefix}-0*(\d+)$"
+    match = re.match(pattern, cleaned)
+    if match:
+        candidate = f"{prefix}-{int(match.group(1)):0{width}d}"
+        if candidate in valid_keys:
+            return candidate
+    return cleaned
 
 
 class InteractiveApp:
@@ -98,8 +113,18 @@ class InteractiveApp:
         order_id = self._generate_order_id()
         self._print(f"Generated Order ID: {order_id}")
 
-        folio_id = self._prompt("Enter Folio ID (e.g. FOL-001): ").strip()
-        scheme_id = self._prompt("Enter Scheme ID (e.g. SCH-001): ").strip()
+        folio_id = _normalize_id(
+            self._prompt("Enter Folio ID (e.g. FOL-001): "),
+            "FOL",
+            3,
+            self.processor.folios,
+        )
+        scheme_id = _normalize_id(
+            self._prompt("Enter Scheme ID (e.g. SCH-01): "),
+            "SCH",
+            2,
+            self.processor.schemes,
+        )
         amount_str = self._prompt("Enter Purchase Amount (INR): ").strip()
         order_ts_str = self._prompt(
             "Enter Order Timestamp (YYYY-MM-DDTHH:MM:SS): "
@@ -152,8 +177,18 @@ class InteractiveApp:
         order_id = self._generate_order_id()
         self._print(f"Generated Order ID: {order_id}")
 
-        folio_id = self._prompt("Enter Folio ID (e.g. FOL-001): ").strip()
-        scheme_id = self._prompt("Enter Scheme ID (e.g. SCH-001): ").strip()
+        folio_id = _normalize_id(
+            self._prompt("Enter Folio ID (e.g. FOL-001): "),
+            "FOL",
+            3,
+            self.processor.folios,
+        )
+        scheme_id = _normalize_id(
+            self._prompt("Enter Scheme ID (e.g. SCH-01): "),
+            "SCH",
+            2,
+            self.processor.schemes,
+        )
         mode = self._prompt("Enter Redemption Mode (ALL / UNITS / AMOUNT): ").strip().upper()
         if mode not in ("ALL", "UNITS", "AMOUNT"):
             self._print("Error: Mode must be ALL, UNITS, or AMOUNT.")
@@ -213,9 +248,24 @@ class InteractiveApp:
         order_id = self._generate_order_id()
         self._print(f"Generated Switch Order ID: {order_id}")
 
-        folio_id = self._prompt("Enter Folio ID (e.g. FOL-001): ").strip()
-        from_scheme = self._prompt("Enter Source Scheme ID (e.g. SCH-001): ").strip()
-        to_scheme = self._prompt("Enter Target Scheme ID (e.g. SCH-002): ").strip()
+        folio_id = _normalize_id(
+            self._prompt("Enter Folio ID (e.g. FOL-001): "),
+            "FOL",
+            3,
+            self.processor.folios,
+        )
+        from_scheme = _normalize_id(
+            self._prompt("Enter Source Scheme ID (e.g. SCH-01): "),
+            "SCH",
+            2,
+            self.processor.schemes,
+        )
+        to_scheme = _normalize_id(
+            self._prompt("Enter Target Scheme ID (e.g. SCH-02): "),
+            "SCH",
+            2,
+            self.processor.schemes,
+        )
         mode = self._prompt("Enter Switch Mode (ALL / UNITS / AMOUNT): ").strip().upper()
         if mode not in ("ALL", "UNITS", "AMOUNT"):
             self._print("Error: Mode must be ALL, UNITS, or AMOUNT.")
@@ -272,8 +322,18 @@ class InteractiveApp:
             sip_id = self._generate_sip_id()
             self._print(f"Using Auto-generated SIP ID: {sip_id}")
 
-        folio_id = self._prompt("Enter Folio ID (e.g. FOL-001): ").strip()
-        scheme_id = self._prompt("Enter Scheme ID (e.g. SCH-001): ").strip()
+        folio_id = _normalize_id(
+            self._prompt("Enter Folio ID (e.g. FOL-001): "),
+            "FOL",
+            3,
+            self.processor.folios,
+        )
+        scheme_id = _normalize_id(
+            self._prompt("Enter Scheme ID (e.g. SCH-01): "),
+            "SCH",
+            2,
+            self.processor.schemes,
+        )
         amount_str = self._prompt("Enter Installment Amount (INR): ").strip()
         sip_day_str = self._prompt("Enter SIP Day of Month (1-28): ").strip()
         reg_ts_str = self._prompt(
@@ -414,7 +474,12 @@ class InteractiveApp:
     def handle_view_folio(self) -> None:
         """Display portfolio holdings and lots for a folio."""
         self._print("\n--- View Investor Folio ---")
-        folio_id = self._prompt("Enter Folio ID (e.g. FOL-001): ").strip()
+        folio_id = _normalize_id(
+            self._prompt("Enter Folio ID (e.g. FOL-001): "),
+            "FOL",
+            3,
+            self.processor.folios,
+        )
         as_of_str = self._prompt(
             "Enter As-Of Date (YYYY-MM-DD, or press Enter for today): "
         ).strip()

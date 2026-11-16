@@ -93,6 +93,26 @@ def test_interactive_purchase_success(test_env):
     assert "PURCHASE|ORD-INT-0001|2026-02-02T10:00:00|FOL-001|SCH-01|10000|2026-02-02T11:00:00" in content
 
 
+def test_interactive_purchase_with_normalized_scheme_id(test_env):
+    """Regression test: User entering 3-digit scheme ID (e.g. SCH-001) is normalized to SCH-01."""
+    inputs = [
+        "1",                    # Menu 1: Purchase
+        "FOL-001",              # Folio
+        "SCH-001",              # Scheme entered as SCH-001
+        "10000",                # Amount
+        "2026-02-02T10:00:00",  # Order TS
+        "2026-02-02T11:00:00",  # Realised TS
+        "12",                   # Exit
+    ]
+    output, app = run_app_with_inputs(inputs, test_env)
+    assert "Transaction Result:" in output
+    assert "Decision       : ACCEPTED" in output
+    assert "Applicable NAV : 76.2197 on 2026-02-02" in output
+    assert "Allotted Units : 131.193" in output
+    assert len(app.processor.confirmations) == 1
+    assert app.processor.confirmations[0]["scheme_id"] == "SCH-01"
+
+
 def test_interactive_purchase_validation_error(test_env):
     """Test purchase input validation rejecting invalid amount."""
     inputs = [
